@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npm --prefix server install 2>&1 | tail -5)",
-      "Bash(npm --prefix client install 2>&1 | tail -5)"
-    ]
-  }
-}
