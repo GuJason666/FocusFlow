@@ -2,7 +2,6 @@ const express = require('express');
 const Milestone = require('../models/Milestone');
 const Project = require('../models/Project');
 const verifyToken = require('../middleware/auth');
-const requireRole = require('../middleware/requireRole');
 
 const router = express.Router();
 
@@ -27,7 +26,7 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 // POST /api/milestones
-router.post('/', verifyToken, requireRole('coach'), async (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
     const { projectId, title, description, deadline } = req.body;
     if (!projectId || !title) return res.status(400).json({ error: 'projectId and title required' });
@@ -43,7 +42,7 @@ router.post('/', verifyToken, requireRole('coach'), async (req, res) => {
 });
 
 // PUT /api/milestones/:id
-router.put('/:id', verifyToken, requireRole('coach'), async (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
     const milestone = await Milestone.findById(req.params.id).populate('project');
     if (!milestone) return res.status(404).json({ error: 'Milestone not found' });
@@ -75,7 +74,7 @@ router.patch('/:id/complete', verifyToken, async (req, res) => {
 });
 
 // DELETE /api/milestones/:id
-router.delete('/:id', verifyToken, requireRole('coach'), async (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const milestone = await Milestone.findById(req.params.id).populate('project');
     if (!milestone) return res.status(404).json({ error: 'Milestone not found' });

@@ -26,16 +26,14 @@ export default function ProjectsListPage() {
   return (
     <Box>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
-        <Typography variant="h5" fontWeight={700}>Projects</Typography>
-        {user?.role === 'coach' && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/projects/new')}>
-            New Project
-          </Button>
-        )}
+        <Typography variant="h5" fontWeight={700}>Goals</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/projects/new')}>
+          New Goal
+        </Button>
       </Box>
 
       {projects.length === 0 ? (
-        <Typography color="text.secondary">No projects yet.</Typography>
+        <Typography color="text.secondary">No goals yet. Create your first goal!</Typography>
       ) : (
         <Grid container spacing={2}>
           {projects.map((project) => (
@@ -50,7 +48,7 @@ export default function ProjectsListPage() {
                       {project.description || 'No description'}
                     </Typography>
                     <Box display="flex" gap={0.5} flexWrap="wrap">
-                      <Chip label={`Coach: ${project.coach.name}`} size="small" variant="outlined" />
+                      <Chip label={`Owner: ${project.coach.name}`} size="small" variant="outlined" />
                       {project.deadline && (
                         <Chip label={`Due: ${format(new Date(project.deadline), 'MMM d, yyyy')}`} size="small" color="warning" variant="outlined" />
                       )}

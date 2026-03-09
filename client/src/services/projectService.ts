@@ -20,3 +20,22 @@ export const addMember = (id: string, email: string) =>
 
 export const removeMember = (id: string, userId: string) =>
   api.delete<Project>(`/projects/${id}/members/${userId}`).then((r) => r.data);
+
+export interface TaskTemplate {
+  title: string;
+  description?: string;
+  daysOfWeek: number[];
+  startTime: string;
+  endTime: string;
+  rangeStart: string;
+  rangeEnd: string;
+}
+
+export interface GenerateTasksResult {
+  tasks: any[];
+  conflicts: any[];
+  conflictCount: number;
+}
+
+export const generateTasks = (id: string, templates: TaskTemplate[]) =>
+  api.post<GenerateTasksResult>(`/projects/${id}/generate-tasks`, { templates }).then((r) => r.data);

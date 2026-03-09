@@ -14,6 +14,7 @@ import IconButton from '@mui/material/IconButton';
 import Alert from '@mui/material/Alert';
 import Stack from '@mui/material/Stack';
 import Checkbox from '@mui/material/Checkbox';
+import LinearProgress from '@mui/material/LinearProgress';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import { format } from 'date-fns';
@@ -69,7 +70,13 @@ export default function ProjectDetailPage() {
 
   if (loading || !project) return <LoadingSpinner />;
 
-  const isCoach = user?._id === (project.coach as any)._id || user?._id === (project.coach as any);
+  const isOwner =
+    user?._id === (project.coach as any)?._id ||
+    user?._id === (project.coach as any);
+
+  const completedTasks = tasks.filter((t) => t.completed).length;
+  const totalTasks = tasks.length;
+  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
   const handleInvite = async () => {
     if (!inviteEmail || !id) return;
@@ -114,10 +121,31 @@ export default function ProjectDetailPage() {
         {project.description && (
           <Typography color="text.secondary" mt={0.5}>{project.description}</Typography>
         )}
+        {project.goal && (
+          <Typography variant="body2" color="text.secondary" mt={0.5}>
+            Category: {project.goal}
+          </Typography>
+        )}
         {project.deadline && (
-          <Chip label={`Due: ${format(new Date(project.deadline), 'MMM d, yyyy')}`} size="small" color="warning" sx={{ mt: 1 }} />
+          <Chip
+            label={`Deadline: ${format(new Date(project.deadline), 'MMM d, yyyy')}`}
+            size="small"
+            color="warning"
+            sx={{ mt: 1 }}
+          />
         )}
       </Box>
+
+      {/* Progress bar */}
+      {totalTasks > 0 && (
+        <Box mb={3}>
+          <Stack direction="row" justifyContent="space-between" mb={0.5}>
+            <Typography variant="body2" color="text.secondary">Task Progress</Typography>
+            <Typography variant="body2" fontWeight={600}>{completedTasks}/{totalTasks} ({progress}%)</Typography>
+          </Stack>
+          <LinearProgress variant="determinate" value={progress} sx={{ height: 8, borderRadius: 4 }} />
+        </Box>
+      )}
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab label="Overview" />
@@ -128,16 +156,13 @@ export default function ProjectDetailPage() {
 
       {tab === 0 && (
         <Box>
-          <Typography variant="subtitle1" fontWeight={600} mb={1}>Goal</Typography>
-          <Typography color="text.secondary" mb={3}>{project.goal || 'No goal set.'}</Typography>
-
           <Typography variant="subtitle1" fontWeight={600} mb={1}>Members</Typography>
           <List dense>
             {project.members.map((member) => (
               <ListItem
                 key={member._id}
                 secondaryAction={
-                  isCoach && (
+                  isOwner && (
                     <IconButton edge="end" size="small" onClick={() => handleRemoveMember(member._id)}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -147,9 +172,12 @@ export default function ProjectDetailPage() {
                 <ListItemText primary={member.name} secondary={member.email} />
               </ListItem>
             ))}
+            {project.members.length === 0 && (
+              <Typography variant="body2" color="text.secondary">No members yet.</Typography>
+            )}
           </List>
 
-          {isCoach && (
+          {isOwner && (
             <Stack direction="row" spacing={1} mt={2}>
               <TextField
                 size="small"
@@ -170,7 +198,7 @@ export default function ProjectDetailPage() {
       {tab === 1 && (
         <List>
           {tasks.length === 0 ? (
-            <Typography color="text.secondary">No tasks in this project.</Typography>
+            <Typography color="text.secondary">No tasks yet.</Typography>
           ) : (
             tasks.map((task) => (
               <ListItem key={task._id} divider>
@@ -178,7 +206,11 @@ export default function ProjectDetailPage() {
                   primary={task.title}
                   secondary={`${format(new Date(task.startTime), 'MMM d, h:mm a')} – ${format(new Date(task.endTime), 'h:mm a')}`}
                 />
-                <Chip label={task.completed ? 'Done' : 'Pending'} size="small" color={task.completed ? 'success' : 'default'} />
+                <Chip
+                  label={task.completed ? 'Done' : 'Pending'}
+                  size="small"
+                  color={task.completed ? 'success' : 'default'}
+                />
               </ListItem>
             ))
           )}
@@ -188,7 +220,7 @@ export default function ProjectDetailPage() {
       {tab === 2 && (
         <List>
           {todos.length === 0 ? (
-            <Typography color="text.secondary">No todos in this project.</Typography>
+            <Typography color="text.secondary">No todos yet.</Typography>
           ) : (
             todos.map((todo) => (
               <ListItem key={todo._id} divider>
@@ -196,7 +228,11 @@ export default function ProjectDetailPage() {
                   primary={todo.title}
                   secondary={todo.deadline ? `Due: ${format(new Date(todo.deadline), 'MMM d, yyyy')}` : 'No deadline'}
                 />
-                <Chip label={todo.completed ? 'Done' : 'Pending'} size="small" color={todo.completed ? 'success' : 'default'} />
+                <Chip
+                  label={todo.completed ? 'Done' : 'Pending'}
+                  size="small"
+                  color={todo.completed ? 'success' : 'default'}
+                />
               </ListItem>
             ))
           )}
@@ -205,8 +241,13 @@ export default function ProjectDetailPage() {
 
       {tab === 3 && (
         <Box>
-          {isCoach && (
-            <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setMilestoneDialog(true)} sx={{ mb: 2 }}>
+          {isOwner && (
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              onClick={() => setMilestoneDialog(true)}
+              sx={{ mb: 2 }}
+            >
               Add Milestone
             </Button>
           )}
@@ -219,7 +260,7 @@ export default function ProjectDetailPage() {
                   key={m._id}
                   divider
                   secondaryAction={
-                    isCoach && (
+                    isOwner && (
                       <IconButton size="small" onClick={() => handleMilestoneDelete(m._id)}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
@@ -241,7 +282,11 @@ export default function ProjectDetailPage() {
             <DialogTitle>New Milestone</DialogTitle>
             <DialogContent>
               <Box pt={1}>
-                <MilestoneForm projectId={id!} onSubmit={handleMilestoneCreate} onCancel={() => setMilestoneDialog(false)} />
+                <MilestoneForm
+                  projectId={id!}
+                  onSubmit={handleMilestoneCreate}
+                  onCancel={() => setMilestoneDialog(false)}
+                />
               </Box>
             </DialogContent>
           </Dialog>

@@ -5,7 +5,6 @@ const Task = require('../models/Task');
 const Todo = require('../models/Todo');
 const User = require('../models/User');
 const verifyToken = require('../middleware/auth');
-const requireRole = require('../middleware/requireRole');
 
 const router = express.Router();
 
@@ -30,7 +29,7 @@ router.get('/', verifyToken, async (req, res) => {
 });
 
 // POST /api/projects
-router.post('/', verifyToken, requireRole('coach'), async (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
     const { title, description, goal, deadline } = req.body;
     if (!title) return res.status(400).json({ error: 'title is required' });
@@ -62,8 +61,82 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
+// POST /api/projects/:id/generate-tasks
+router.post('/:id/generate-tasks', verifyToken, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!isMember(project, req.user._id))
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const { templates } = req.body;
+    if (!Array.isArray(templates) || templates.length === 0)
+      return res.status(400).json({ error: 'templates array required' });
+
+    const tasksToInsert = [];
+    let overallStart = null;
+    let overallEnd = null;
+
+    for (const tpl of templates) {
+      const { title, description, daysOfWeek, startTime, endTime, rangeStart, rangeEnd } = tpl;
+      if (!title || !Array.isArray(daysOfWeek) || !rangeStart || !rangeEnd) continue;
+
+      const [startH, startM] = (startTime || '09:00').split(':').map(Number);
+      const [endH, endM] = (endTime || '10:00').split(':').map(Number);
+
+      const rStart = new Date(rangeStart);
+      const rEnd = new Date(rangeEnd);
+      if (!overallStart || rStart < overallStart) overallStart = rStart;
+      if (!overallEnd || rEnd > overallEnd) overallEnd = rEnd;
+
+      const current = new Date(rStart);
+      while (current <= rEnd) {
+        if (daysOfWeek.includes(current.getDay())) {
+          const taskStart = new Date(current);
+          taskStart.setHours(startH, startM, 0, 0);
+          const taskEnd = new Date(current);
+          taskEnd.setHours(endH, endM, 0, 0);
+          tasksToInsert.push({
+            title,
+            description: description || '',
+            startTime: taskStart,
+            endTime: taskEnd,
+            owner: req.user._id,
+            project: project._id,
+            completed: false,
+            isRecurringTemplate: false,
+          });
+        }
+        current.setDate(current.getDate() + 1);
+      }
+    }
+
+    if (tasksToInsert.length === 0)
+      return res.json({ tasks: [], conflicts: [], conflictCount: 0 });
+
+    const existingTasks = await Task.find({
+      owner: req.user._id,
+      isRecurringTemplate: { $ne: true },
+      startTime: { $lt: overallEnd },
+      endTime: { $gt: overallStart },
+    });
+
+    const created = await Task.insertMany(tasksToInsert);
+
+    const conflicts = created.filter((newTask) =>
+      existingTasks.some(
+        (e) => e.startTime < newTask.endTime && e.endTime > newTask.startTime
+      )
+    );
+
+    res.status(201).json({ tasks: created, conflicts, conflictCount: conflicts.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /api/projects/:id
-router.put('/:id', verifyToken, requireRole('coach'), async (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -81,7 +154,7 @@ router.put('/:id', verifyToken, requireRole('coach'), async (req, res) => {
 });
 
 // DELETE /api/projects/:id
-router.delete('/:id', verifyToken, requireRole('coach'), async (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -98,7 +171,7 @@ router.delete('/:id', verifyToken, requireRole('coach'), async (req, res) => {
 });
 
 // POST /api/projects/:id/members
-router.post('/:id/members', verifyToken, requireRole('coach'), async (req, res) => {
+router.post('/:id/members', verifyToken, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -120,7 +193,7 @@ router.post('/:id/members', verifyToken, requireRole('coach'), async (req, res) 
 });
 
 // DELETE /api/projects/:id/members/:userId
-router.delete('/:id/members/:userId', verifyToken, requireRole('coach'), async (req, res) => {
+router.delete('/:id/members/:userId', verifyToken, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });

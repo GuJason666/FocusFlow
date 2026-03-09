@@ -16,7 +16,7 @@ import Typography from '@mui/material/Typography';
 
 const navItems = [
   { label: 'Calendar', path: '/calendar', icon: <CalendarMonthIcon /> },
-  { label: 'Projects', path: '/projects', icon: <FolderIcon /> },
+  { label: 'Goals', path: '/projects', icon: <FolderIcon /> },
   { label: 'Tasks', path: '/tasks', icon: <AssignmentIcon /> },
   { label: 'Todos', path: '/todos', icon: <CheckBoxIcon /> },
 ];

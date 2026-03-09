@@ -31,14 +31,7 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/calendar" replace /> },
       { path: 'calendar', element: <CalendarPage /> },
       { path: 'projects', element: <ProjectsListPage /> },
-      {
-        path: 'projects/new',
-        element: (
-          <ProtectedRoute requiredRole="coach">
-            <ProjectNewPage />
-          </ProtectedRoute>
-        ),
-      },
+      { path: 'projects/new', element: <ProjectNewPage /> },
       { path: 'projects/:id', element: <ProjectDetailPage /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/new', element: <TaskNewPage /> },
