@@ -61,6 +61,52 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
+// ─── Schedule settings ────────────────────────────────────────────────────────
+// Returns the scheduling window for a user. Currently uses hardcoded defaults;
+// replace the body with a user-prefs DB lookup to make this user-configurable.
+function getScheduleSettings(/* user */) {
+  return {
+    wakeupHour: 8,   // 8:00 AM — earliest a generated task may start
+    bedtimeHour: 22, // 10:00 PM — latest a generated task may end
+  };
+}
+
+function slotsOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+// Finds the earliest available slot of `durationMs` on `dayDate`, starting at
+// or after `desiredStartH:desiredStartM`, within the wakeup–bedtime window and
+// not overlapping any interval in `busyIntervals` ({ start: Date, end: Date }[]).
+// Returns { start, end } or null if the day is fully booked.
+function findSlot(dayDate, desiredStartH, desiredStartM, durationMs, settings, busyIntervals) {
+  const { wakeupHour, bedtimeHour } = settings;
+
+  const wakeup = new Date(dayDate);
+  wakeup.setHours(wakeupHour, 0, 0, 0);
+
+  const bedtime = new Date(dayDate);
+  bedtime.setHours(bedtimeHour, 0, 0, 0);
+
+  let slotStart = new Date(dayDate);
+  slotStart.setHours(desiredStartH, desiredStartM, 0, 0);
+  if (slotStart < wakeup) slotStart = new Date(wakeup);
+
+  while (true) {
+    const slotEnd = new Date(slotStart.getTime() + durationMs);
+    if (slotEnd > bedtime) return null; // no room left today
+
+    const conflict = busyIntervals.find((iv) =>
+      slotsOverlap(slotStart, slotEnd, iv.start, iv.end)
+    );
+    if (!conflict) return { start: new Date(slotStart), end: slotEnd };
+
+    // Advance past the blocking interval and try again
+    slotStart = new Date(conflict.end);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // POST /api/projects/:id/generate-tasks
 router.post('/:id/generate-tasks', verifyToken, async (req, res) => {
   try {
@@ -73,63 +119,96 @@ router.post('/:id/generate-tasks', verifyToken, async (req, res) => {
     if (!Array.isArray(templates) || templates.length === 0)
       return res.status(400).json({ error: 'templates array required' });
 
-    const tasksToInsert = [];
+    const settings = getScheduleSettings(req.user);
+
+    // Determine the overall date range across all templates for a single DB query
     let overallStart = null;
     let overallEnd = null;
+    for (const tpl of templates) {
+      if (!tpl.rangeStart || !tpl.rangeEnd) continue;
+      const rStart = new Date(tpl.rangeStart);
+      const rEnd = new Date(tpl.rangeEnd);
+      if (!overallStart || rStart < overallStart) overallStart = rStart;
+      if (!overallEnd || rEnd > overallEnd) overallEnd = rEnd;
+    }
+
+    if (!overallStart || !overallEnd)
+      return res.json({ tasks: [], conflicts: [], conflictCount: 0, skippedCount: 0 });
+
+    // Fetch existing tasks and todos in the range once before scheduling
+    const [existingTasks, existingTodos] = await Promise.all([
+      Task.find({
+        owner: req.user._id,
+        isRecurringTemplate: { $ne: true },
+        startTime: { $lt: overallEnd },
+        endTime: { $gt: overallStart },
+      }),
+      Todo.find({
+        owner: req.user._id,
+        isRecurringTemplate: { $ne: true },
+        deadline: { $gte: overallStart, $lte: overallEnd },
+        completed: false,
+      }),
+    ]);
+
+    // Build a mutable busy-intervals list.
+    // Tasks have a full time range; todos have only a deadline (point in time),
+    // so we treat each todo deadline as a 1-minute block to detect overlap.
+    const busyIntervals = [
+      ...existingTasks.map((t) => ({ start: t.startTime, end: t.endTime })),
+      ...existingTodos
+        .filter((t) => t.deadline)
+        .map((t) => ({ start: t.deadline, end: new Date(t.deadline.getTime() + 60_000) })),
+    ];
+
+    const tasksToInsert = [];
+    let skippedCount = 0;
 
     for (const tpl of templates) {
       const { title, description, daysOfWeek, startTime, endTime, rangeStart, rangeEnd } = tpl;
       if (!title || !Array.isArray(daysOfWeek) || !rangeStart || !rangeEnd) continue;
 
       const [startH, startM] = (startTime || '09:00').split(':').map(Number);
-      const [endH, endM] = (endTime || '10:00').split(':').map(Number);
+      const [endH, endM]     = (endTime   || '10:00').split(':').map(Number);
+
+      const durationMs = ((endH * 60 + endM) - (startH * 60 + startM)) * 60 * 1000;
+      if (durationMs <= 0) continue;
 
       const rStart = new Date(rangeStart);
-      const rEnd = new Date(rangeEnd);
-      if (!overallStart || rStart < overallStart) overallStart = rStart;
-      if (!overallEnd || rEnd > overallEnd) overallEnd = rEnd;
+      const rEnd   = new Date(rangeEnd);
 
       const current = new Date(rStart);
+      current.setHours(0, 0, 0, 0);
+
       while (current <= rEnd) {
         if (daysOfWeek.includes(current.getDay())) {
-          const taskStart = new Date(current);
-          taskStart.setHours(startH, startM, 0, 0);
-          const taskEnd = new Date(current);
-          taskEnd.setHours(endH, endM, 0, 0);
-          tasksToInsert.push({
-            title,
-            description: description || '',
-            startTime: taskStart,
-            endTime: taskEnd,
-            owner: req.user._id,
-            project: project._id,
-            completed: false,
-            isRecurringTemplate: false,
-          });
+          const slot = findSlot(current, startH, startM, durationMs, settings, busyIntervals);
+          if (slot) {
+            tasksToInsert.push({
+              title,
+              description: description || '',
+              startTime: slot.start,
+              endTime: slot.end,
+              owner: req.user._id,
+              project: project._id,
+              completed: false,
+              isRecurringTemplate: false,
+            });
+            // Mark the new slot busy so later templates respect it too
+            busyIntervals.push({ start: slot.start, end: slot.end });
+          } else {
+            skippedCount++;
+          }
         }
         current.setDate(current.getDate() + 1);
       }
     }
 
     if (tasksToInsert.length === 0)
-      return res.json({ tasks: [], conflicts: [], conflictCount: 0 });
-
-    const existingTasks = await Task.find({
-      owner: req.user._id,
-      isRecurringTemplate: { $ne: true },
-      startTime: { $lt: overallEnd },
-      endTime: { $gt: overallStart },
-    });
+      return res.json({ tasks: [], conflicts: [], conflictCount: 0, skippedCount });
 
     const created = await Task.insertMany(tasksToInsert);
-
-    const conflicts = created.filter((newTask) =>
-      existingTasks.some(
-        (e) => e.startTime < newTask.endTime && e.endTime > newTask.startTime
-      )
-    );
-
-    res.status(201).json({ tasks: created, conflicts, conflictCount: conflicts.length });
+    res.status(201).json({ tasks: created, conflicts: [], conflictCount: 0, skippedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
