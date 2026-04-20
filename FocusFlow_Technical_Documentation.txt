@@ -1,0 +1,1779 @@
+================================================================================
+FOCUSFLOW — TECHNICAL DOCUMENTATION
+================================================================================
+Project:    FocusFlow
+Course:     CEN3031 — Introduction to Software Engineering
+Description: A full-stack productivity and academic scheduling application
+             designed to help university students manage goals, tasks, course
+             schedules, and todos with intelligent conflict detection,
+             recurring task automation, and email reminders.
+================================================================================
+
+
+TABLE OF CONTENTS
+-----------------
+1.  System Overview
+2.  Technology Stack
+3.  System Architecture
+4.  Project Directory Structure
+5.  Backend — Data Models
+6.  Backend — API Endpoints
+7.  Backend — Middleware
+8.  Backend — Business Logic & Services
+9.  Frontend — Application Setup
+10. Frontend — Type System
+11. Frontend — State Management (Zustand)
+12. Frontend — Service Layer
+13. Frontend — Custom Hooks
+14. Frontend — Routing & Navigation
+15. Frontend — Layout & Shell
+16. Frontend — Calendar System
+17. Frontend — Form Components
+18. Frontend — Page Components
+19. Key Features Deep-Dive
+20. Data Flow Diagrams
+21. Environment & Configuration
+22. Known Constraints & Design Decisions
+
+
+================================================================================
+1. SYSTEM OVERVIEW
+================================================================================
+
+FocusFlow is a single-user productivity application tailored for university
+students. It provides five interconnected modules:
+
+  1. Goals  — Project-based goal tracking with milestone auto-generation and
+              team collaboration (coach/student roles).
+
+  2. Tasks  — Calendar-integrated task management with full recurring task
+              support, email reminders, and category tagging.
+
+  3. Courses — University course scheduler using the UF period system. Generates
+               all lecture tasks for the entire term, detects schedule conflicts,
+               and auto-bumps displaced tasks to the Todos list.
+
+  4. Todos  — A week-scoped (not deadline-scoped) backlog. Every todo is
+              assigned to a specific calendar week. Todos can be promoted to
+              scheduled tasks by dragging them onto the calendar.
+
+  5. Dashboard — Completion-rate analytics across last week, this week, last
+                month, and this month, with per-category filtering.
+
+The application uses a REST API backend (Node.js/Express) with MongoDB for
+persistence and a React/TypeScript single-page application frontend.
+
+
+================================================================================
+2. TECHNOLOGY STACK
+================================================================================
+
+BACKEND
+-------
+  Runtime:       Node.js (v18+)
+  Framework:     Express 5.0.1
+  Database:      MongoDB via Mongoose 8.9.2
+  Authentication: JSON Web Tokens (jsonwebtoken 9.0.2)
+  Password Hash: bcryptjs 2.4.3
+  Scheduling:    node-cron 4.2.1 (email reminder job, runs every minute)
+  Email:         Resend API (resend 6.12.0) — transactional email delivery
+  Date Utils:    date-fns 4.1.0
+  Config:        dotenv 16.4.5
+  Dev Server:    nodemon (dev dependency)
+
+FRONTEND
+--------
+  Framework:     React 19.0.0 with TypeScript
+  Build Tool:    Vite (with React plugin and path aliases)
+  UI Library:    Material UI (MUI) v5.16.14 — components, icons, theming
+  Date Pickers:  @mui/x-date-pickers 7.23.3 with date-fns adapter
+  State Mgmt:    Zustand 5.0.3
+  Routing:       React Router DOM 7.1.3
+  HTTP Client:   Axios 1.7.9
+  Date Utils:    date-fns 3.6.0
+  Drag & Drop:   @dnd-kit/core 6.1.0, @dnd-kit/sortable 8.0.0,
+                 @dnd-kit/utilities 3.2.2
+  Styling:       @emotion/react, @emotion/styled (MUI peer dependencies)
+
+
+================================================================================
+3. SYSTEM ARCHITECTURE
+================================================================================
+
+                        ┌─────────────────────────────┐
+                        │       React SPA (Vite)       │
+                        │   TypeScript / MUI / Zustand  │
+                        │   Port 5173 (dev)             │
+                        └────────────┬────────────────-─┘
+                                     │  HTTP/REST via Axios
+                                     │  Proxy /api → :3000
+                                     ▼
+                        ┌─────────────────────────────┐
+                        │   Express REST API Server    │
+                        │   Node.js  ·  Port 3000      │
+                        │                              │
+                        │  ┌──────────────────────┐    │
+                        │  │   JWT Middleware      │    │
+                        │  │   verifyToken()       │    │
+                        │  └──────────────────────┘    │
+                        │                              │
+                        │  Routes:                     │
+                        │    /api/auth                 │
+                        │    /api/users                │
+                        │    /api/projects             │
+                        │    /api/milestones           │
+                        │    /api/tasks                │
+                        │    /api/todos                │
+                        │    /api/courses              │
+                        └────────────┬─────────────────┘
+                                     │  Mongoose ODM
+                                     ▼
+                        ┌─────────────────────────────┐
+                        │         MongoDB              │
+                        │  Collections:                │
+                        │    users, projects,          │
+                        │    milestones, tasks,        │
+                        │    todos, courses            │
+                        └─────────────────────────────┘
+
+                         ┌────────────────────────────┐
+                         │  node-cron Reminder Job     │
+                         │  Fires every minute         │
+                         │  → Resend API → Email       │
+                         └────────────────────────────┘
+
+Dev Proxy: Vite forwards all /api/* requests to http://localhost:3000,
+allowing the frontend to call /api/tasks without CORS issues in development.
+
+
+================================================================================
+4. PROJECT DIRECTORY STRUCTURE
+================================================================================
+
+FocusFlow/
+├── server/
+│   ├── config/
+│   │   └── db.js                  # Mongoose connection setup
+│   ├── middleware/
+│   │   ├── auth.js                # JWT verification middleware
+│   │   └── requireRole.js         # Role-based access control
+│   ├── models/
+│   │   ├── User.js                # User schema
+│   │   ├── Project.js             # Goal/project schema
+│   │   ├── Milestone.js           # Milestone schema
+│   │   ├── Task.js                # Task schema (with recurring + course support)
+│   │   ├── Todo.js                # Todo schema (with weekOf)
+│   │   └── Course.js              # Course schema (UF period system)
+│   ├── routes/
+│   │   ├── auth.js                # Register, login, me
+│   │   ├── users.js               # User search (for adding members)
+│   │   ├── projects.js            # Goal CRUD + task generation + cascade delete
+│   │   ├── milestones.js          # Milestone CRUD
+│   │   ├── tasks.js               # Task CRUD + recurring virtual generation
+│   │   ├── todos.js               # Todo CRUD + week filtering + conversion
+│   │   └── courses.js             # Course CRUD + conflict detection + task gen
+│   ├── services/
+│   │   └── emailService.js        # Resend API email sender
+│   ├── jobs/
+│   │   └── reminderJob.js         # node-cron reminder dispatcher
+│   ├── app.js                     # Express app setup + route registration
+│   ├── index.js                   # Server entry point
+│   ├── .env                       # Environment variables (not committed)
+│   └── package.json
+│
+└── client/
+    ├── src/
+    │   ├── constants/
+    │   │   └── categories.ts      # CATEGORIES constant array
+    │   ├── types/
+    │   │   ├── user.ts
+    │   │   ├── task.ts
+    │   │   ├── todo.ts
+    │   │   ├── project.ts
+    │   │   ├── milestone.ts
+    │   │   └── course.ts
+    │   ├── services/
+    │   │   ├── api.ts             # Axios instance with auth interceptor
+    │   │   ├── authService.ts
+    │   │   ├── taskService.ts
+    │   │   ├── todoService.ts
+    │   │   ├── projectService.ts
+    │   │   ├── milestoneService.ts
+    │   │   └── courseService.ts
+    │   ├── store/
+    │   │   ├── useAuthStore.ts    # Auth + localStorage persistence
+    │   │   ├── useTaskStore.ts    # Tasks + virtual recurring logic
+    │   │   ├── useTodoStore.ts
+    │   │   ├── useProjectStore.ts
+    │   │   └── useCourseStore.ts
+    │   ├── hooks/
+    │   │   ├── useCalendarEvents.ts  # Merges tasks+todos for calendar
+    │   │   └── useRecurring.ts       # Expands recurring templates
+    │   ├── routes/
+    │   │   ├── router.tsx
+    │   │   └── ProtectedRoute.tsx
+    │   ├── components/
+    │   │   ├── layout/
+    │   │   │   ├── AppShell.tsx
+    │   │   │   ├── Topbar.tsx
+    │   │   │   └── Sidebar.tsx
+    │   │   ├── common/
+    │   │   │   ├── LoadingSpinner.tsx
+    │   │   │   ├── ConfirmDialog.tsx
+    │   │   │   └── RoleBadge.tsx
+    │   │   ├── calendar/
+    │   │   │   ├── CalendarToolbar.tsx
+    │   │   │   ├── MonthView.tsx
+    │   │   │   ├── WeekView.tsx
+    │   │   │   ├── DayView.tsx
+    │   │   │   ├── EventBlock.tsx
+    │   │   │   ├── TodoMarker.tsx
+    │   │   │   ├── TodoSidebar.tsx
+    │   │   │   └── ConvertTodoModal.tsx
+    │   │   └── forms/
+    │   │       ├── TaskForm.tsx
+    │   │       ├── TodoForm.tsx
+    │   │       ├── ProjectForm.tsx
+    │   │       ├── MilestoneForm.tsx
+    │   │       ├── GoalCreationForm.tsx    # 3-step stepper
+    │   │       └── CourseCreationForm.tsx  # 2-step stepper with period grid
+    │   ├── pages/
+    │   │   ├── auth/         LoginPage, RegisterPage
+    │   │   ├── dashboard/    DashboardPage
+    │   │   ├── calendar/     CalendarPage
+    │   │   ├── projects/     ProjectsListPage, ProjectNewPage, ProjectDetailPage
+    │   │   ├── tasks/        TasksPage, TaskNewPage, TaskDetailPage
+    │   │   ├── todos/        TodosPage, TodoNewPage, TodoDetailPage
+    │   │   ├── courses/      CoursesPage, CourseNewPage, CourseDetailPage
+    │   │   ├── coach/        CoachDashboard
+    │   │   └── settings/     SettingsPage
+    │   ├── App.tsx
+    │   └── main.tsx
+    ├── vite.config.ts
+    └── package.json
+
+
+================================================================================
+5. BACKEND — DATA MODELS
+================================================================================
+
+All models use Mongoose with timestamps: true (adds createdAt, updatedAt).
+
+--------------------------------------------------------------------------------
+5.1 User Model  (server/models/User.js)
+--------------------------------------------------------------------------------
+
+Fields:
+  name          String    required, trimmed
+  email         String    required, unique, lowercase, trimmed
+  passwordHash  String    required (bcrypt hash, never returned in responses)
+  role          String    enum: ['student', 'coach'], default: 'student'
+
+Instance Methods:
+  comparePassword(plain)  →  Promise<boolean>
+    Calls bcrypt.compare(plain, this.passwordHash)
+
+  toJSON()
+    Overrides default serialization to strip passwordHash from all responses
+
+--------------------------------------------------------------------------------
+5.2 Project Model  (server/models/Project.js)
+--------------------------------------------------------------------------------
+
+Represents a goal-tracking project. The "goal" field is a human-readable
+string (e.g. "Run a marathon") — not a reference to another document.
+
+Fields:
+  title        String    required, trimmed
+  description  String    default: ''
+  goal         String    default: ''  (also used as category for generated tasks)
+  deadline     Date      optional
+  coach        ObjectId  ref: 'User', required  (the project creator/owner)
+  members      [ObjectId] ref: 'User'           (invited collaborators)
+
+--------------------------------------------------------------------------------
+5.3 Milestone Model  (server/models/Milestone.js)
+--------------------------------------------------------------------------------
+
+Checkpoints within a project.
+
+Fields:
+  project      ObjectId  ref: 'Project', required
+  title        String    required, trimmed
+  description  String    default: ''
+  deadline     Date      optional
+  completed    Boolean   default: false
+  completedAt  Date      set when completed is toggled to true
+
+--------------------------------------------------------------------------------
+5.4 Task Model  (server/models/Task.js)
+--------------------------------------------------------------------------------
+
+The central entity. Represents a single scheduled work block with a start
+time, end time, and rich metadata.
+
+Fields:
+  title              String    required, trimmed
+  description        String    default: ''
+  startTime          Date      required
+  endTime            Date      required
+  owner              ObjectId  ref: 'User', required
+  assignedTo         ObjectId  ref: 'User'
+  project            ObjectId  ref: 'Project'
+  completed          Boolean   default: false
+  completedAt        Date
+  recurring          Embedded {
+                       frequency  String  enum: ['daily','weekly','monthly']
+                       endDate    Date    optional
+                     }
+  isRecurringTemplate  Boolean  default: false
+                       If true, this record is a template; actual calendar
+                       instances are generated virtually at query time.
+  recurringTemplateId  ObjectId ref: 'Task'
+                       Set on materialized instances that were split from a
+                       recurring template.
+  occurrenceDate       Date
+                       The specific date this instance represents (for dedup).
+  category           String    enum: ['Academic','Wellness','Social','Career','Other']
+                               default: 'Other'
+  convertedFromTodo  ObjectId  ref: 'Todo'
+  reminderHours      Number    null = no reminder; 0 = at start time
+  reminderSent       Boolean   default: false  (set true by cron job after send)
+  course             ObjectId  ref: 'Course'   (set for lecture tasks)
+  courseCode         String    (stored denormalized for fast calendar display)
+
+Indexes:
+  { owner: 1, startTime: 1 }            — primary query pattern
+  { assignedTo: 1, startTime: 1 }       — coaching view
+  { recurringTemplateId: 1, occurrenceDate: 1 }  — dedup check
+  { course: 1 }                          — fast cascade delete
+
+--------------------------------------------------------------------------------
+5.5 Todo Model  (server/models/Todo.js)
+--------------------------------------------------------------------------------
+
+A lightweight backlog item. Unlike tasks, todos are not placed on the
+calendar directly — they are assigned to a calendar week.
+
+Fields:
+  title              String    required, trimmed
+  description        String    default: ''
+  deadline           Date      optional (for soft due date within the week)
+  owner              ObjectId  ref: 'User', required
+  assignedTo         ObjectId  ref: 'User'
+  project            ObjectId  ref: 'Project'
+  completed          Boolean   default: false
+  completedAt        Date
+  recurring          Embedded (same structure as Task)
+  isRecurringTemplate  Boolean
+  recurringTemplateId  ObjectId ref: 'Todo'
+  occurrenceDate     Date
+  category           String    enum: ['Academic','Wellness','Social','Career','Other']
+                               default: 'Other'
+  convertedToTaskId  ObjectId  ref: 'Task'
+                     Set when user schedules the todo onto the calendar.
+                     Todos with this field set are hidden from the todos list.
+  weekOf             Date
+                     The Sunday starting the week this todo belongs to.
+                     Todos without weekOf are hidden from all queries.
+                     Auto-set when a task is bumped by course conflict resolution.
+
+Indexes:
+  { owner: 1, deadline: 1 }
+  { assignedTo: 1, deadline: 1 }
+  { owner: 1, weekOf: 1 }
+
+--------------------------------------------------------------------------------
+5.6 Course Model  (server/models/Course.js)
+--------------------------------------------------------------------------------
+
+Represents a university course with a fixed weekly lecture schedule spanning
+an academic term. Upon creation, generates all lecture tasks automatically.
+
+Fields:
+  courseCode    String    required, trimmed  (e.g. "COP3530")
+  courseName    String    required, trimmed  (e.g. "Data Structures")
+  termStart     Date      required
+  termEnd       Date      required
+  owner         ObjectId  ref: 'User', required
+  schedule      [{
+                  dayOfWeek  Number  1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+                  period     String  '1'–'11', 'E1', 'E2', 'E3'
+                  _id: false
+                }]
+  reminderHours Number    null = no reminder (propagated to all lecture tasks)
+
+Indexes:
+  { owner: 1, termStart: 1 }
+
+UF Period Time Table (hardcoded in routes/courses.js):
+  Period  Start    End      Period  Start    End
+  ------  ------   ------   ------  ------   ------
+  P1      7:25am   8:15am   P8      3:00pm   3:50pm
+  P2      8:30am   9:20am   P9      4:05pm   4:55pm
+  P3      9:35am   10:25am  P10     5:10pm   6:00pm
+  P4      10:40am  11:30am  P11     6:15pm   7:05pm
+  P5      11:45am  12:35pm  E1      7:20pm   8:10pm
+  P6      12:50pm  1:40pm   E2      8:20pm   9:10pm
+  P7      1:55pm   2:45pm   E3      9:20pm   10:10pm
+
+
+================================================================================
+6. BACKEND — API ENDPOINTS
+================================================================================
+
+All protected endpoints require:  Authorization: Bearer <JWT_TOKEN>
+
+Base URL: /api
+
+--------------------------------------------------------------------------------
+6.1 Authentication  (routes/auth.js)
+--------------------------------------------------------------------------------
+
+POST /api/auth/register
+  Auth:    None (public)
+  Body:    { name: string, email: string, password: string, role?: string }
+  Returns: 201 { token: string, user: User }
+  Errors:  400 (missing fields), 409 (email exists), 500
+  Notes:   Hashes password with bcrypt (saltRounds=12), signs JWT
+
+POST /api/auth/login
+  Auth:    None (public)
+  Body:    { email: string, password: string }
+  Returns: 200 { token: string, user: User }
+  Errors:  400 (missing fields), 401 (invalid credentials), 500
+
+GET /api/auth/me
+  Auth:    Required
+  Returns: 200 User
+  Notes:   Returns req.user set by verifyToken middleware
+
+--------------------------------------------------------------------------------
+6.2 Users  (routes/users.js)
+--------------------------------------------------------------------------------
+
+GET /api/users/search?email=<email>
+  Auth:    Required
+  Returns: 200 User
+  Errors:  400 (email param missing), 404 (not found)
+  Notes:   Case-insensitive search; used for adding project members
+
+--------------------------------------------------------------------------------
+6.3 Projects / Goals  (routes/projects.js)
+--------------------------------------------------------------------------------
+
+GET /api/projects
+  Auth:    Required
+  Returns: 200 [Project]  (where user is coach OR member)
+  Notes:   Populates coach and members with name+email
+
+POST /api/projects
+  Auth:    Required
+  Body:    { title, description?, goal?, deadline? }
+  Returns: 201 Project
+  Notes:   Creator becomes coach; members starts empty
+
+GET /api/projects/:id
+  Auth:    Required (member or coach)
+  Returns: 200 { ...Project, milestones: [Milestone] }
+  Errors:  403 (not member), 404
+
+PUT /api/projects/:id
+  Auth:    Required (coach only)
+  Body:    { title?, description?, goal?, deadline? }
+  Returns: 200 Project
+
+DELETE /api/projects/:id
+  Auth:    Required (coach only)
+  Returns: 200 { message }
+  Side Effects:
+    Milestone.deleteMany({ project: id })
+    Task.deleteMany({ project: id })
+    Todo.deleteMany({ project: id })
+
+POST /api/projects/:id/members
+  Auth:    Required
+  Body:    { email: string }
+  Returns: 200 Updated Project
+  Errors:  403, 404 (user not found), 409 (already member)
+
+DELETE /api/projects/:id/members/:userId
+  Auth:    Required (coach only)
+  Returns: 200 Updated Project
+
+POST /api/projects/:id/generate-tasks
+  Auth:    Required (member)
+  Body:    {
+    templates: [{
+      title:        string
+      description?: string
+      daysOfWeek:   number[]    (0=Sun, 1=Mon … 6=Sat)
+      startTime:    string      (HH:mm, default '09:00')
+      endTime:      string      (HH:mm, default '10:00')
+      rangeStart:   ISO string
+      rangeEnd:     ISO string
+      reminderHours?: number
+    }]
+  }
+  Returns: 201 { tasks: [Task], conflicts: [Task], conflictCount: number }
+  Process:
+    1. For each template, walk rangeStart→rangeEnd day by day
+    2. If date.getDay() matches any value in daysOfWeek, create task record
+    3. Task.insertMany(all generated tasks)
+    4. Query for existing tasks overlapping the overall time window
+    5. Return created tasks + those that conflict with existing ones
+
+--------------------------------------------------------------------------------
+6.4 Milestones  (routes/milestones.js)
+--------------------------------------------------------------------------------
+
+GET /api/milestones?projectId=<id>
+  Auth:    Required (member)
+  Returns: 200 [Milestone]  sorted by deadline
+
+POST /api/milestones
+  Auth:    Required (coach)
+  Body:    { projectId, title, description?, deadline? }
+  Returns: 201 Milestone
+
+PUT /api/milestones/:id
+  Auth:    Required (coach)
+  Body:    { title?, description?, deadline? }
+  Returns: 200 Milestone
+
+PATCH /api/milestones/:id/complete
+  Auth:    Required (member)
+  Returns: 200 Milestone
+  Notes:   Toggles completed flag; sets/clears completedAt
+
+DELETE /api/milestones/:id
+  Auth:    Required (coach)
+  Returns: 200 { message }
+
+--------------------------------------------------------------------------------
+6.5 Tasks  (routes/tasks.js)
+--------------------------------------------------------------------------------
+
+GET /api/tasks?start=<ISO>&end=<ISO>&projectId=<id>?
+  Auth:    Required
+  Returns: 200 [Task]  (includes virtual recurring instances)
+  Process (when no projectId):
+    1. Fetch concrete tasks in [start, end] for owner/assignedTo
+    2. Fetch all recurring templates
+    3. For each template, generate virtual instances within range:
+       - Frequency daily:   one per day
+       - Frequency weekly:  matching weekday
+       - Frequency monthly: matching day-of-month
+    4. Check existing materialized instances (recurringTemplateId set)
+    5. Skip virtual if a materialized instance exists for same date
+    6. Merge + return (virtual instances have _virtual: true)
+
+POST /api/tasks
+  Auth:    Required
+  Body:    { title, startTime, endTime, description?, assignedTo?,
+             project?, recurring?, reminderHours?, category? }
+  Returns: 201 Task
+  Notes:   isRecurringTemplate = !!recurring?.frequency
+
+GET /api/tasks/:id
+  Auth:    Required
+  Returns: 200 Task
+
+PUT /api/tasks/:id
+  Auth:    Required
+  Body:    { title?, startTime?, endTime?, description?, assignedTo?,
+             project?, recurring?, updateScope? }
+  Returns: 200 Task
+  Special case (updateScope === 'this'):
+    When editing a single occurrence of a recurring template:
+    1. Creates a new concrete Task record with the given startTime/endTime
+    2. Sets recurringTemplateId = template._id
+    3. Sets occurrenceDate = startTime date (for dedup in future queries)
+    4. Does NOT modify the original template
+    Returns the new materialized instance
+
+PATCH /api/tasks/:id/complete
+  Auth:    Required
+  Returns: 200 Task
+  Notes:   Toggles completed; sets/clears completedAt
+
+DELETE /api/tasks/:id
+  Auth:    Required
+  Returns: 200 { message }
+
+--------------------------------------------------------------------------------
+6.6 Todos  (routes/todos.js)
+--------------------------------------------------------------------------------
+
+GET /api/todos?projectId=<id>?
+  Auth:    Required
+  Returns: 200 [Todo]  sorted by deadline
+  Filter:  convertedToTaskId does not exist  AND  weekOf is not null
+  Notes:   Only returns todos that have been assigned to a week
+
+POST /api/todos
+  Auth:    Required
+  Body:    { title, description?, deadline?, assignedTo?, project?,
+             recurring?, category?, weekOf? }
+  Returns: 201 Todo
+
+PUT /api/todos/:id
+  Auth:    Required
+  Body:    { title?, description?, deadline?, assignedTo?, project?,
+             recurring?, category?, weekOf? }
+  Returns: 200 Todo
+
+PATCH /api/todos/:id/complete
+  Auth:    Required
+  Returns: 200 Todo
+
+DELETE /api/todos/:id
+  Auth:    Required
+  Returns: 200 { message }
+
+POST /api/todos/:id/convert
+  Auth:    Required
+  Body:    { startTime: ISO, endTime: ISO }
+  Returns: 201 { task: Task, todo: Todo }
+  Errors:  409 (already converted)
+  Process:
+    1. Create Task from todo's title/description/owner/assignedTo/project
+    2. Set task.convertedFromTodo = todo._id
+    3. Set todo.convertedToTaskId = task._id
+    4. Return both (todo now excluded from GET /todos automatically)
+
+--------------------------------------------------------------------------------
+6.7 Courses  (routes/courses.js)
+--------------------------------------------------------------------------------
+
+POST /api/courses
+  Auth:    Required
+  Body:    {
+    courseCode:   string
+    courseName:   string
+    termStart:    ISO string
+    termEnd:      ISO string
+    schedule:     [{ dayOfWeek: number, period: string }]
+    reminderHours?: number | null
+  }
+  Returns: 201 { course: Course, lectureCount: number, bumpedCount: number }
+  Errors:  400 (missing fields), 409 (course schedule conflict)
+  Full Process:
+    1. Walk every date in [termStart, termEnd]
+    2. For each date, check if date.getDay() matches any slot's dayOfWeek
+    3. For matching slots, compute slotStart/slotEnd using LOCAL date arithmetic:
+         new Date(year, month, day, periodHour, periodMin)
+       (Local time construction avoids UTC offset errors for AM periods)
+    4. Build allSlots[] of { slotStart, slotEnd, dayOfWeek, period }
+    5. Query existing lecture tasks (course field set) overlapping the term range
+    6. Check JS-side per-slot overlap: if any existing lecture overlaps any slot
+       → return 409 with the conflicting courseCode
+    7. Query non-course tasks (course: null) overlapping the term range
+    8. Deduplicate by task _id (a task might overlap multiple slots)
+    9. For each conflicting non-course task:
+         a. Compute weekOf = startOfWeek(task.startTime)  [Sunday]
+         b. Create Todo with same title/description/category/owner + weekOf
+         c. Delete the original task
+         d. Increment bumpedCount
+    10. Create Course document
+    11. Task.insertMany() all lecture tasks:
+          title:    "{courseCode} {DayAbbr} P{period}"
+          category: 'Academic'
+          course:   course._id
+          courseCode: courseCode
+          startTime/endTime: computed from period table
+          reminderHours: from request
+    12. Return { course, lectureCount, bumpedCount }
+
+GET /api/courses
+  Auth:    Required
+  Returns: 200 [Course]  sorted by termStart
+
+GET /api/courses/:id
+  Auth:    Required (owner only)
+  Returns: 200 Course
+  Errors:  403, 404
+
+GET /api/courses/:id/lectures
+  Auth:    Required (owner only)
+  Returns: 200 [Task]  (up to 5 upcoming, sorted by startTime)
+  Filter:  course=id AND startTime >= now
+
+DELETE /api/courses/:id
+  Auth:    Required (owner only)
+  Returns: 200 { message, deletedLectures: number }
+  Side Effects:
+    Task.deleteMany({ course: course._id })
+
+
+================================================================================
+7. BACKEND — MIDDLEWARE
+================================================================================
+
+--------------------------------------------------------------------------------
+7.1 verifyToken  (server/middleware/auth.js)
+--------------------------------------------------------------------------------
+
+Attached to every protected route as middleware.
+
+Process:
+  1. Read Authorization header
+  2. Extract token from "Bearer <token>" format
+  3. If missing: return 401 { error: 'No token provided' }
+  4. jwt.verify(token, process.env.JWT_SECRET)
+  5. If invalid/expired: return 401
+  6. User.findById(decoded.id).select('-passwordHash')
+  7. If not found: return 401
+  8. Set req.user = user; call next()
+
+--------------------------------------------------------------------------------
+7.2 requireRole  (server/middleware/requireRole.js)
+--------------------------------------------------------------------------------
+
+Factory function that returns a middleware checking user role.
+
+Usage:  router.post('/...', verifyToken, requireRole('coach'), handler)
+
+Process:
+  1. Check req.user exists and req.user.role is in the allowed roles array
+  2. If not: return 403 { error: 'Forbidden' }
+  3. Otherwise: call next()
+
+
+================================================================================
+8. BACKEND — BUSINESS LOGIC & SERVICES
+================================================================================
+
+--------------------------------------------------------------------------------
+8.1 Recurring Task Generation  (routes/tasks.js — GET handler)
+--------------------------------------------------------------------------------
+
+Recurring tasks are stored as templates (isRecurringTemplate: true) and
+never directly appear on the calendar. When a client queries GET /api/tasks,
+the server generates virtual instances in memory:
+
+  For frequency = 'daily':
+    Generate one task for every day in the queried range.
+
+  For frequency = 'weekly':
+    Generate one task for each week in the range, matching the same day
+    of the week as the template's startTime.
+
+  For frequency = 'monthly':
+    Generate one task per month, matching the same day-of-month.
+
+  Deduplication:
+    Before adding a virtual instance, check if a materialized instance
+    already exists with matching recurringTemplateId and occurrenceDate.
+    If so, use the materialized record (which may have a different completion
+    state or modified time) instead of the virtual one.
+
+  Virtual instances have:
+    _id:    "virtual_{templateId}_{ISO date string}"
+    _virtual: true
+    recurringTemplateId: template._id
+
+  When a user toggles a virtual instance (frontend store logic):
+    1. Call PUT /api/tasks/{templateId} with { updateScope: 'this',
+       startTime: virtual.startTime, endTime: virtual.endTime }
+    2. This materializes the instance in the DB
+    3. Then call PATCH /api/tasks/{newId}/complete to toggle it
+
+--------------------------------------------------------------------------------
+8.2 Email Reminder Job  (server/jobs/reminderJob.js)
+--------------------------------------------------------------------------------
+
+Runs every minute via node-cron.
+
+Query:
+  Task.find({
+    reminderHours: { $ne: null },
+    reminderSent: false,
+    completed: false,
+    startTime: { $gte: 24 hours ago }
+  }).populate('owner', 'name email')
+
+For each matched task:
+  reminderTime = task.startTime - (task.reminderHours * 3,600,000 ms)
+  if (now >= reminderTime):
+    sendReminderEmail(task.owner.email, task.owner.name, task)
+    task.reminderSent = true
+    task.save()
+
+Guard: If RESEND_API_KEY is not set, the job skips silently.
+
+--------------------------------------------------------------------------------
+8.3 Email Service  (server/services/emailService.js)
+--------------------------------------------------------------------------------
+
+Uses the Resend SDK:
+
+  const resend = new Resend(process.env.RESEND_API_KEY)
+
+  sendReminderEmail(to, name, task):
+    From:    "FocusFlow <onboarding@resend.dev>"
+    To:      <to>
+    Subject: Reminder: "{task.title}" starts in {hoursWord}
+    Body:    HTML template with greeting, task title, start/end time,
+             optional description, and unsubscribe note
+
+Note: Resend free tier restricts delivery to the account's registered email
+address. Both the FocusFlow account and Resend account must use the same email.
+
+--------------------------------------------------------------------------------
+8.4 Course Conflict Detection Algorithm
+--------------------------------------------------------------------------------
+
+When creating a course (POST /api/courses):
+
+Step 1 — Slot Generation:
+  For each day D from termStart to termEnd (inclusive):
+    jsDay = D.getDay()   // 0=Sun, 1=Mon … 6=Sat
+    For each slot in schedule where slot.dayOfWeek === jsDay:
+      slotStart = new Date(D.year, D.month, D.date, period.hour, period.min)
+      slotEnd   = slotStart + 50 minutes
+      allSlots.push({ slotStart, slotEnd, dayOfWeek, period })
+
+Step 2 — Course Conflict Check (blocking):
+  existingLectures = Task.find({
+    owner: userId,
+    course: { $exists: true, $ne: null },
+    startTime: { $lt: latestSlotEnd },
+    endTime:   { $gt: earliestSlotStart }
+  })
+  For each slot in allSlots:
+    For each existing lecture:
+      If slot.slotStart < lecture.endTime AND slot.slotEnd > lecture.startTime:
+        RETURN 409 { error: "Schedule conflicts with <courseCode>" }
+
+Step 3 — Non-Course Task Bump (non-blocking):
+  conflictingTasks = Task.find({
+    owner: userId,
+    course: null,
+    startTime: { $lt: latestSlotEnd },
+    endTime:   { $gt: earliestSlotStart }
+  })
+  bumpMap = Map<taskId, Task>  // deduplicate
+  For each slot, for each conflictingTask:
+    If overlaps: bumpMap.set(task._id, task)
+  For each task in bumpMap:
+    Create Todo({ title, description, category, owner,
+                  weekOf: startOfWeek(task.startTime) })
+    task.deleteOne()
+
+Step 4 — Create Course + Bulk Insert Tasks
+
+
+================================================================================
+9. FRONTEND — APPLICATION SETUP
+================================================================================
+
+Entry Point (src/main.tsx):
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <StrictMode><App /></StrictMode>
+  )
+
+App Component (src/App.tsx):
+  Wraps everything in:
+  1. MUI ThemeProvider (custom theme from src/theme.ts)
+  2. LocalizationProvider (date-fns adapter for MUI date pickers)
+  3. AppRouter (React Router browser router)
+
+Vite Config (vite.config.ts):
+  - React plugin with fast refresh
+  - Path alias: '@' → './src'
+  - Dev server proxy: '/api' → 'http://localhost:3000'
+    (Eliminates CORS during development)
+  - host: true  (enables LAN access, e.g., from mobile devices)
+
+Theme (src/theme.ts):
+  Custom MUI theme — customizes primary/secondary palette colors,
+  typography, and component defaults.
+
+
+================================================================================
+10. FRONTEND — TYPE SYSTEM
+================================================================================
+
+All types are in src/types/ and match the server-side schemas exactly.
+Key additions/notes:
+
+Task type additions:
+  course?:     string    // ObjectId of parent Course
+  courseCode?: string    // Denormalized for calendar display
+  _virtual?:   boolean   // Client-computed; true for virtual recurring instances
+                         // Not stored in DB; added by GET /api/tasks response
+
+Todo type addition:
+  weekOf?: string   // ISO string of week's Sunday
+
+Course types:
+  CourseScheduleSlot { dayOfWeek: number, period: string }
+  Course { _id, courseCode, courseName, termStart, termEnd, owner,
+           schedule: CourseScheduleSlot[], reminderHours? }
+
+CalendarEvent (defined in hooks/useCalendarEvents.ts, not a DB type):
+  id:        string
+  type:      'task' | 'todo'
+  title:     string     (task.courseCode ?? task.title for lecture tasks)
+  start:     Date
+  end:       Date
+  completed: boolean
+  color:     string     ('#2563EB' task, '#F59E0B' todo, '#9CA3AF' complete)
+  original:  Task | Todo
+
+
+================================================================================
+11. FRONTEND — STATE MANAGEMENT (ZUSTAND)
+================================================================================
+
+All stores use Zustand with a single-slice pattern (create<State>((set, get) =>
+{ ... })). No middleware except useAuthStore which uses the persist middleware.
+
+--------------------------------------------------------------------------------
+11.1 useAuthStore
+--------------------------------------------------------------------------------
+
+State:  { user: User | null, token: string | null }
+Actions:
+  login(user, token)   → set both fields
+  logout()             → clear both fields
+  setUser(user)        → update user without changing token
+
+Persistence: Zustand persist middleware writes to localStorage under the key
+'auth-storage'. The axios interceptor in api.ts reads the token from here.
+
+--------------------------------------------------------------------------------
+11.2 useTaskStore
+--------------------------------------------------------------------------------
+
+State:  { tasks: Task[], rangeStart: string|null, rangeEnd: string|null,
+          loading: boolean, error: string|null }
+
+Key action — toggleComplete(id):
+  Virtual task path:
+    1. Find the task in local state where _id === id AND _virtual === true
+    2. Call taskService.updateTask(templateId, { updateScope: 'this',
+         startTime: virtual.startTime, endTime: virtual.endTime })
+       → Server materializes instance, returns new concrete Task
+    3. Call taskService.toggleTask(materialized._id)
+    4. Replace the virtual entry in state with the completed concrete task
+       (set _virtual: false on the updated record)
+  Concrete task path:
+    1. Call taskService.toggleTask(id)
+    2. Replace task in state with updated version
+
+Other actions:
+  fetchTasksInRange(start, end) — calls GET /api/tasks, sets loading state
+  createTask(data)  — POST, appends to state
+  updateTask(id, data)  — PUT, updates in state
+  deleteTask(id)  — DELETE, filters from state
+  addTask(task)   — add directly (used by useTodoStore.convertToTask)
+  removeTask(id)  — remove directly
+
+--------------------------------------------------------------------------------
+11.3 useTodoStore
+--------------------------------------------------------------------------------
+
+State:  { todos: Todo[], loading: boolean, error: string|null }
+
+Key action — convertToTask(id, startTime, endTime):
+  1. Call todoService.convertTodo(id, startTime, endTime)
+  2. Remove the todo from local state (filter by id)
+  3. Call useTaskStore.getState().addTask(result.task)
+     (Cross-store communication — adds materialized task to task store)
+
+Other standard CRUD actions follow the same pattern as other stores.
+
+--------------------------------------------------------------------------------
+11.4 useProjectStore
+--------------------------------------------------------------------------------
+
+State:  { projects: Project[], loading: boolean, error: string|null }
+Actions: fetchProjects, createProject, updateProject, deleteProject,
+         addMember(projectId, email), removeMember(projectId, userId)
+
+--------------------------------------------------------------------------------
+11.5 useCourseStore
+--------------------------------------------------------------------------------
+
+State:  { courses: Course[], loading: boolean, error: string|null }
+Actions:
+  fetchCourses()  — GET /api/courses, standard loading pattern
+  createCourse(data)  — POST /api/courses
+    IMPORTANT: Does NOT catch errors. The calling component (CourseCreationForm)
+    is responsible for catching errors and differentiating 409 (course conflict)
+    from other errors. Returns CreateCourseResult { course, lectureCount, bumpedCount }.
+  deleteCourse(id)  — DELETE, filters from state
+
+
+================================================================================
+12. FRONTEND — SERVICE LAYER
+================================================================================
+
+All services use the shared Axios instance from src/services/api.ts:
+
+  const api = axios.create({ baseURL: '/api' })
+  api.interceptors.request.use((config) => {
+    const stored = localStorage.getItem('auth-storage')
+    const token = JSON.parse(stored)?.state?.token
+    if (token) config.headers.Authorization = `Bearer ${token}`
+    return config
+  })
+
+Each service module exports plain async functions that return typed promises
+by extracting response.data. No error handling in services — errors propagate
+to stores or components.
+
+Service function signatures:
+
+authService.ts:
+  register(data)       → Promise<{ token, user }>
+  login(data)          → Promise<{ token, user }>
+  getMe()              → Promise<User>
+
+taskService.ts:
+  getTasksInRange(start, end)   → Promise<Task[]>
+  getTask(id)                   → Promise<Task>
+  createTask(data)              → Promise<Task>
+  updateTask(id, data)          → Promise<Task>
+  toggleTask(id)                → Promise<Task>
+  deleteTask(id)                → Promise<void>
+
+todoService.ts:
+  getTodos(projectId?)          → Promise<Todo[]>
+  createTodo(data)              → Promise<Todo>
+  updateTodo(id, data)          → Promise<Todo>
+  toggleTodo(id)                → Promise<Todo>
+  deleteTodo(id)                → Promise<void>
+  convertTodo(id, start, end)   → Promise<{ task, todo }>
+
+projectService.ts:
+  getProjects()                 → Promise<Project[]>
+  getProject(id)                → Promise<Project & { milestones }>
+  createProject(data)           → Promise<Project>
+  updateProject(id, data)       → Promise<Project>
+  deleteProject(id)             → Promise<void>
+  addMember(id, email)          → Promise<Project>
+  removeMember(id, userId)      → Promise<Project>
+  generateTasks(id, templates)  → Promise<{ tasks, conflicts, conflictCount }>
+
+milestoneService.ts:
+  getMilestones(projectId)      → Promise<Milestone[]>
+  createMilestone(data)         → Promise<Milestone>
+  updateMilestone(id, data)     → Promise<Milestone>
+  toggleMilestone(id)           → Promise<Milestone>
+  deleteMilestone(id)           → Promise<void>
+
+courseService.ts:
+  getCourses()                  → Promise<Course[]>
+  getCourse(id)                 → Promise<Course>
+  getUpcomingLectures(id)       → Promise<Task[]>
+  createCourse(data)            → Promise<CreateCourseResult>
+  deleteCourse(id)              → Promise<void>
+
+
+================================================================================
+13. FRONTEND — CUSTOM HOOKS
+================================================================================
+
+--------------------------------------------------------------------------------
+13.1 useCalendarEvents  (src/hooks/useCalendarEvents.ts)
+--------------------------------------------------------------------------------
+
+Merges tasks and todos into a unified CalendarEvent[] for calendar views.
+
+Signature: useCalendarEvents(viewStart: Date, viewEnd: Date): CalendarEvent[]
+
+Logic:
+  1. Read tasks from useTaskStore, todos from useTodoStore
+  2. For each task where start <= viewEnd AND end >= viewStart:
+       Push CalendarEvent with:
+         title:  task.courseCode || task.title  ← lecture tasks show code only
+         color:  completed → '#9CA3AF'  |  active → '#2563EB'
+  3. For each todo where:
+       - deadline is set
+       - deadline is within [viewStart, viewEnd]
+       - convertedToTaskId is not set
+     Push CalendarEvent with:
+         start:  startOfDay(deadline)
+         end:    endOfDay(deadline)
+         color:  completed → '#9CA3AF'  |  active → '#F59E0B'
+  4. Return memoized array (deps: tasks, todos, viewStart, viewEnd)
+
+--------------------------------------------------------------------------------
+13.2 useRecurring  (src/hooks/useRecurring.ts)
+--------------------------------------------------------------------------------
+
+Expands recurring template tasks into virtual instances for calendar display.
+(Note: The server also does this expansion. The client-side hook is used for
+offline/optimistic display scenarios and is wrapped by useCalendarEvents.)
+
+Signature: useRecurring(tasks: Task[], viewStart: Date, viewEnd: Date): Task[]
+
+Logic:
+  For each task with isRecurringTemplate === true:
+    Iterate dates in range:
+      daily:   every day
+      weekly:  same day-of-week as template.startTime
+      monthly: same day-of-month
+    For each matching date, generate virtual instance with:
+      _id: `virtual_${template._id}_${date.getTime()}`
+      _virtual: true
+      startTime/endTime: adjusted to the occurrence date
+      occurrenceDate: the date
+    Skip if recurringEndDate is set and date > recurringEndDate
+  Return memoized expanded array
+
+
+================================================================================
+14. FRONTEND — ROUTING & NAVIGATION
+================================================================================
+
+Router: React Router DOM v7 (createBrowserRouter)
+
+Route Structure:
+  /login              → LoginPage
+  /register           → RegisterPage
+  /                   → ProtectedRoute → AppShell (layout wrapper)
+    index             → Navigate to /dashboard
+    /dashboard        → DashboardPage
+    /calendar         → CalendarPage
+    /projects         → ProjectsListPage
+    /projects/new     → ProjectNewPage
+    /projects/:id     → ProjectDetailPage
+    /tasks            → TasksPage
+    /tasks/new        → TaskNewPage
+    /tasks/:id        → TaskDetailPage
+    /todos            → TodosPage
+    /todos/new        → TodoNewPage
+    /todos/:id        → TodoDetailPage
+    /courses          → CoursesPage
+    /courses/new      → CourseNewPage
+    /courses/:id      → CourseDetailPage
+    /coach            → ProtectedRoute (role:'coach') → CoachDashboard
+    /settings         → SettingsPage
+  *                   → Navigate to /
+
+ProtectedRoute (src/routes/ProtectedRoute.tsx):
+  - Reads token and user from useAuthStore
+  - If no token/user: Navigate to /login (with replace)
+  - If requiredRole specified and role doesn't match: Navigate to /calendar
+  - Otherwise: render children
+
+Cross-page navigation with state:
+  DashboardPage uses navigate('/calendar', { state: { date, view } }) to open
+  the calendar at a specific week/month. CalendarPage reads location.state on
+  mount to set its initial view and date.
+
+
+================================================================================
+15. FRONTEND — LAYOUT & SHELL
+================================================================================
+
+AppShell (src/components/layout/AppShell.tsx):
+  Permanent structure:
+    <Box sx={{ display: 'flex' }}>
+      <Topbar />
+      <Sidebar />  (permanent on md+, drawer on mobile)
+      <Box component="main">
+        <Outlet />  ← page content renders here
+      </Box>
+    </Box>
+
+  Sidebar width: 240px
+  Topbar height: 64px
+  Mobile: Sidebar becomes a temporary MUI Drawer, toggled by menu button
+
+Topbar (src/components/layout/Topbar.tsx):
+  - Left: Hamburger menu (mobile only), FocusFlow branding
+  - Right: User name, RoleBadge chip, Logout button
+  - Logout: calls useAuthStore.logout() then navigate('/login')
+
+Sidebar (src/components/layout/Sidebar.tsx):
+  Navigation items (in order):
+    Dashboard    /dashboard    DashboardIcon
+    Calendar     /calendar     CalendarMonthIcon
+    Goals        /projects     FolderIcon
+    Tasks        /tasks        AssignmentIcon
+    Courses      /courses      SchoolIcon
+    Todos        /todos        CheckBoxIcon
+    [Coach Dashboard  /coach   DashboardIcon  (role='coach' only)]
+    Settings     /settings     SettingsIcon
+
+  Active state: ListItemButton selected when location.pathname.startsWith(path)
+  Mobile close: calls props.onClose() after navigation
+
+
+================================================================================
+16. FRONTEND — CALENDAR SYSTEM
+================================================================================
+
+The calendar is a custom-built multi-view scheduler, not a third-party library.
+
+--------------------------------------------------------------------------------
+16.1 CalendarPage  (src/pages/calendar/CalendarPage.tsx)
+--------------------------------------------------------------------------------
+
+State:
+  view:          'day' | 'week' | 'month'
+  currentDate:   Date  (the anchor date for the current view)
+  convertModal:  { open, todo, prefillStart }
+  activeDragTodo: Todo | null
+
+Initialization from location.state:
+  If navigate('/calendar', { state: { date, view } }) was called (e.g., from
+  Dashboard), CalendarPage reads state on mount and sets view + currentDate.
+
+DnD Integration (dnd-kit):
+  DndContext with PointerSensor (activationConstraint: distance 8px)
+  TodoSidebar items are draggable (usesDraggable)
+  DayView/WeekView time slots are droppable (useDroppable)
+  onDragEnd: opens ConvertTodoModal with the dropped slot's time as prefillStart
+
+Event click routing:
+  handleEventClick(event: CalendarEvent):
+    If type === 'task' AND _virtual === false: navigate('/tasks/' + id)
+    If type === 'task' AND _virtual === true: no action (virtual = no detail page)
+    If type === 'todo': navigate('/todos/' + id)
+
+View range computation:
+  'day':   startOfDay(currentDate) → endOfDay(currentDate)
+  'week':  startOfWeek(currentDate, {weekStartsOn:0}) → endOfWeek(...)
+  'month': startOfMonth(currentDate) → endOfMonth(currentDate)
+
+Data loading: fetchTasksInRange called when view range changes.
+
+--------------------------------------------------------------------------------
+16.2 MonthView
+--------------------------------------------------------------------------------
+
+Layout: 7-column CSS grid (Sun through Sat)
+Row generation: startOfMonth → endOfMonth, padded with prev/next month days
+Max events per day: 2 visible + "+N more" overflow chip
+Todo dots: small colored circles (TodoMarker component) below events
+Highlight today: primary.main background on date number
+
+--------------------------------------------------------------------------------
+16.3 WeekView
+--------------------------------------------------------------------------------
+
+Layout: Time column (52px) + 7 day columns
+Time grid: 24 hours × 2 slots per hour = 48 slots
+Slot height: 28px → HOUR_HEIGHT = 56px
+Event positioning:
+  top:    ((startMinutes / 60) * HOUR_HEIGHT)px
+  height: Math.max(22, (durationMinutes / 60) * HOUR_HEIGHT)px
+Scrollable inner area; highlights today's column
+
+--------------------------------------------------------------------------------
+16.4 DayView
+--------------------------------------------------------------------------------
+
+Same structure as WeekView but single day column.
+HOUR_HEIGHT = 60px, SLOT_HEIGHT = 30px
+
+--------------------------------------------------------------------------------
+16.5 CalendarToolbar
+--------------------------------------------------------------------------------
+
+Navigation:
+  Day view:   Prev/Next advances by 1 day
+  Week view:  Prev/Next advances by 1 week (subWeeks/addWeeks)
+  Month view: Prev/Next advances by 1 month
+
+Title display:
+  Day:   "Friday, April 19, 2026"
+  Week:  "Apr 19 – Apr 25, 2026"
+  Month: "April 2026"
+
+"Today" button: sets currentDate to new Date()
+
+--------------------------------------------------------------------------------
+16.6 Todo-to-Task Drag-and-Drop Flow
+--------------------------------------------------------------------------------
+
+1. User drags a todo chip from the TodoSidebar
+2. User drops it on a time slot in WeekView or DayView
+3. onDragEnd fires: CalendarPage opens ConvertTodoModal with:
+     todo = dragged todo
+     prefillStart = start time of the dropped slot
+4. ConvertTodoModal shows start/end TimePicker pre-filled
+5. User confirms → useTodoStore.convertToTask(id, start, end)
+6. Todo disappears from sidebar; new task appears on calendar
+
+
+================================================================================
+17. FRONTEND — FORM COMPONENTS
+================================================================================
+
+--------------------------------------------------------------------------------
+17.1 TaskForm
+--------------------------------------------------------------------------------
+
+Fields: Title (required), Description, Start Time (DateTimePicker),
+        End Time (DateTimePicker), Category (Select), Recurring toggle
+        → Frequency (Select: daily/weekly/monthly), Email Reminder toggle
+        → Hours before (Select: 0, 1, 2, 6, 12, 24, 48)
+
+Defaults: startTime = now, endTime = now + 1h, category = 'Other',
+          reminderHours = 1 (when toggle enabled)
+
+--------------------------------------------------------------------------------
+17.2 TodoForm
+--------------------------------------------------------------------------------
+
+Fields: Title (required), Description, Category (Select),
+        Week DatePicker ("pick any day in target week"),
+        Deadline DatePicker (optional)
+
+Week computation: startOfWeek(selectedDate, { weekStartsOn: 0 })
+The computed Sunday is sent as weekOf to the API.
+
+--------------------------------------------------------------------------------
+17.3 GoalCreationForm  (3-Step Stepper)
+--------------------------------------------------------------------------------
+
+Step 0 — Goal Info:
+  Title, Description, Category (Select from CATEGORIES), Deadline,
+  Auto-milestone inputs: current baseline, target value, unit
+  → If all three + deadline filled: auto-generates 3 milestones at
+    25%, 50%, 75% of (target - baseline), distributed across deadline
+
+Step 1 — Milestones:
+  Dynamic list of { title, deadline } pairs
+  Add/remove buttons; minimum 1 milestone
+
+Step 2 — Weekly Tasks:
+  Dynamic list of task templates, each with:
+    Title, Days of week (ToggleButtonGroup Sun-Sat),
+    Start time (HH:mm), End time (HH:mm),
+    From date, To date, Email reminder toggle + hours
+
+  Estimated count alert: sum(templates) of
+    (days_in_range / 7) * daysOfWeek.length
+
+Submission flow:
+  1. createProject({ title, description, goal:category, deadline })
+  2. For each non-empty milestone: createMilestone(...)
+  3. For each valid template: generateTasks(projectId, [template])
+  4. If conflictCount > 0: show Alert → redirect to project after 3s
+  5. Otherwise: navigate to /projects/:id immediately
+
+--------------------------------------------------------------------------------
+17.4 CourseCreationForm  (2-Step Stepper)
+--------------------------------------------------------------------------------
+
+Step 0 — Course Info:
+  Course Code (e.g. "COP3530"), Course Name (e.g. "Data Structures"),
+  Term Start (DatePicker), Term End (DatePicker),
+  Email reminder toggle + hours before (Select: 0,1,2,6,12,24,48)
+  canNext: all four text/date fields must be filled
+
+Step 1 — Schedule Grid:
+  14 rows (P1–P11, E1–E3) × 6 columns (Mon–Sat)
+  Each cell is a clickable colored Box
+  State: selectedSlots = Set<"${dayOfWeek}-${period}">
+  Selected: bgcolor='primary.main'; Unselected: bgcolor='grey.100'
+  Shows: "X slots selected — ~Y lectures total"
+  Estimated count: Math.round((termDays / 7) * selectedSlots.size)
+
+Submission:
+  schedule = Array.from(selectedSlots).map(key => {
+    const dashIdx = key.indexOf('-')
+    return { dayOfWeek: Number(key.slice(0, dashIdx)),
+             period: key.slice(dashIdx + 1) }
+  })
+  POST /api/courses
+  → 409: show error with conflicting course code, stay on form
+  → bumpedCount > 0: show info alert, redirect after 2.5s
+  → success: navigate('/courses') immediately
+
+
+================================================================================
+18. FRONTEND — PAGE COMPONENTS
+================================================================================
+
+--------------------------------------------------------------------------------
+18.1 DashboardPage
+--------------------------------------------------------------------------------
+
+Location: src/pages/dashboard/DashboardPage.tsx
+
+Loads tasks for last month → end of current month on mount.
+
+StatCard component shows per-period stats:
+  planned:    count of non-virtual, non-template tasks in period
+  completed:  count of those where completed === true
+  rate:       Math.round(completed / planned * 100)
+  Progress bar color: green (≥80%), yellow (50–79%), red (<50%)
+
+Four cards: Last Week, This Week, Last Month, This Month.
+
+Category filter (ToggleButtonGroup): All | Academic | Wellness | Social |
+  Career | Other. Filters the task pool before computing stats. Uses useMemo
+  with dependency [tasks, categoryFilter].
+
+Click any card: navigate('/calendar', { state: { date, view } })
+  Last Week / This Week: view = 'week'
+  Last Month / This Month: view = 'month'
+
+--------------------------------------------------------------------------------
+18.2 CalendarPage
+--------------------------------------------------------------------------------
+
+See Section 16 for full detail.
+
+--------------------------------------------------------------------------------
+18.3 TasksPage
+--------------------------------------------------------------------------------
+
+Fetches tasks from 1 year ago to 2 weeks in the future (to show past tasks).
+Sorted by startTime ascending.
+Each item: Checkbox, title+time, category Chip, Recurring Chip, Delete button.
+Virtual tasks: click title does nothing (no detail page for virtual instances).
+
+--------------------------------------------------------------------------------
+18.4 TodosPage
+--------------------------------------------------------------------------------
+
+Fetches all todos (server filters to weekOf != null automatically).
+Groups by weekOf:
+  Map<weekOf ISO, Todo[]>  sorted ascending by date
+  Each group: section header "MMM d – MMM d", Divider, List of todos
+  Each item: Checkbox, title+deadline, category Chip, Scheduled Chip, Delete
+
+--------------------------------------------------------------------------------
+18.5 CoursesPage
+--------------------------------------------------------------------------------
+
+Grid of course cards: courseCode (bold), courseName, "X lectures/week"
+Click → navigate to /courses/:id
+
+--------------------------------------------------------------------------------
+18.6 CourseDetailPage
+--------------------------------------------------------------------------------
+
+Header: courseCode, courseName, term dates, reminder info
+Schedule: read-only 14×6 grid with schedule slots highlighted
+Upcoming: up to 5 next lectures (from GET /api/courses/:id/lectures)
+Delete button: ConfirmDialog → cascade delete → navigate('/courses')
+
+--------------------------------------------------------------------------------
+18.7 ProjectDetailPage
+--------------------------------------------------------------------------------
+
+Sections:
+  - Project header with edit button (coach only)
+  - Coach info and member management (add by email, remove)
+  - Milestones list with completion toggles and edit/delete
+  - Task generation panel (GoalCreationForm Step 2 embedded)
+  - Progress indicator based on completed milestones
+
+--------------------------------------------------------------------------------
+18.8 Auth Pages
+--------------------------------------------------------------------------------
+
+LoginPage: email + password → authService.login() → store token → /dashboard
+RegisterPage: name + email + password + role toggle → authService.register() → /dashboard
+
+
+================================================================================
+19. KEY FEATURES DEEP-DIVE
+================================================================================
+
+--------------------------------------------------------------------------------
+19.1 Recurring Tasks — Full Lifecycle
+--------------------------------------------------------------------------------
+
+Creation:
+  User fills TaskForm with "Recurring" toggle ON + frequency.
+  POST /api/tasks creates a task with isRecurringTemplate: true.
+
+Display:
+  GET /api/tasks generates virtual instances in memory.
+  Virtual instances have _id like "virtual_<templateId>_<timestamp>".
+  They are returned alongside concrete tasks in the same array.
+
+Editing a single occurrence:
+  User clicks "edit this occurrence" on a virtual instance.
+  Frontend calls PUT /api/tasks/:templateId with updateScope: 'this'.
+  Server creates a new concrete task record with recurringTemplateId set.
+  Future queries detect the materialized instance and skip the virtual
+  occurrence for that date.
+
+Completing a virtual instance:
+  useTaskStore.toggleComplete detects _virtual flag.
+  Materializes the instance first (same PUT call).
+  Then toggles completion on the new concrete task.
+
+--------------------------------------------------------------------------------
+19.2 Course Schedule → Calendar Tasks Pipeline
+--------------------------------------------------------------------------------
+
+1. User opens Add Course, fills Step 0, selects slots in Step 1 grid.
+2. Frontend computes schedule = [{ dayOfWeek, period }] from selectedSlots Set.
+3. POST /api/courses → server slot generation loop.
+4. Server checks all UF period times from PERIOD_TIMES constant.
+5. For each date in [termStart, termEnd] where date.getDay() matches a slot:
+   a. Compute slotStart using LOCAL new Date(y, m, d, h, min) — not UTC.
+   b. slotEnd = slotStart + 50 minutes.
+6. Conflict checks run (see Section 8.4).
+7. Task.insertMany creates all lecture tasks at once (bulk insert).
+8. Tasks appear in calendar immediately on next fetch.
+
+Calendar display:
+  useCalendarEvents replaces task.title with task.courseCode for lecture tasks,
+  so "COP3530 Mon P3" shows as "COP3530" in all calendar chip labels.
+
+Deletion cascade:
+  DELETE /api/courses/:id runs Task.deleteMany({ course: courseId }).
+  All lecture tasks disappear from the calendar on next fetch.
+
+--------------------------------------------------------------------------------
+19.3 Todo Week Assignment + Conflict Bump
+--------------------------------------------------------------------------------
+
+Manual todo creation:
+  User picks any date in the target week via TodoForm's week DatePicker.
+  Frontend computes startOfWeek(selected, { weekStartsOn: 0 }) → ISO string.
+  weekOf is sent to POST /api/todos.
+
+Conflict-induced bump (automatic):
+  When a course is created and a non-course task is in a conflicting slot:
+    Server computes weekOf = startOfWeek(task.startTime) for the bumped task.
+    Creates Todo with the same title/description/category/owner + computed weekOf.
+    Deletes the original Task.
+  The bumped todo appears in the Todos page under its assigned week group.
+
+TodosPage grouping:
+  Filter: todos where weekOf is set (old todos without weekOf are hidden).
+  Group by weekOf ISO string → Map<string, Todo[]>.
+  Sort groups ascending.
+  Header: "Apr 19 – Apr 25" (format Sunday date, add 6 days for Saturday).
+
+--------------------------------------------------------------------------------
+19.4 Category System
+--------------------------------------------------------------------------------
+
+Five categories: Academic | Wellness | Social | Career | Other
+
+Defined as a const array in src/constants/categories.ts:
+  export const CATEGORIES = ['Academic','Wellness','Social','Career','Other']
+
+Used in:
+  - TaskForm, TodoForm: category Select dropdown
+  - GoalCreationForm Step 0: goal category (passed as goal field on Project)
+  - CourseCreationForm: always Academic (hardcoded for lecture tasks)
+  - DashboardPage: ToggleButtonGroup filter
+  - TasksPage, TodosPage: category Chip display
+  - Server models: enum validation on Task.category and Todo.category
+
+Lecture tasks generated by courses always have category: 'Academic'.
+
+--------------------------------------------------------------------------------
+19.5 Email Reminder System
+--------------------------------------------------------------------------------
+
+Configuration:
+  RESEND_API_KEY in server/.env
+  Reminder times available: 0, 1, 2, 6, 12, 24, 48 hours before task start
+
+Flow:
+  1. User creates task or course with reminder enabled.
+  2. reminderHours stored on Task document.
+  3. node-cron fires every minute.
+  4. Query: tasks with reminderHours != null, reminderSent = false,
+     completed = false, startTime >= 24h ago.
+  5. For each: if now >= (startTime - reminderHours * 3600000):
+       sendReminderEmail(owner.email, owner.name, task)
+       task.reminderSent = true
+  6. reminderSent prevents duplicate sends.
+
+Limitation: Resend free tier delivers only to the account's registered email.
+
+--------------------------------------------------------------------------------
+19.6 Drag-and-Drop Todo Scheduling
+--------------------------------------------------------------------------------
+
+Library: @dnd-kit (core + sortable + utilities)
+
+Draggable: TodoSidebar items (each todo = one DraggableItem)
+Droppable: WeekView and DayView time slots (each 30-min slot = one DroppableSlot)
+
+Slot ID format: "slot-{ISO date string}-{hour}-{minute}"
+
+onDragEnd handler (CalendarPage):
+  Extract date/hour/minute from slot ID.
+  Construct prefillStart date.
+  Open ConvertTodoModal.
+
+ConvertTodoModal:
+  Shows start time (prefilled) and end time (default: +1h) TimePicker.
+  On confirm: useTodoStore.convertToTask(todo._id, startISO, endISO).
+  This creates the task via API and removes the todo from the sidebar.
+
+
+================================================================================
+20. DATA FLOW DIAGRAMS
+================================================================================
+
+--- Creating a Course (End-to-End) ---
+
+User → CourseCreationForm (Step 0 + Step 1)
+     ↓
+useCourseStore.createCourse(data)
+     ↓
+courseService.createCourse(data) → POST /api/courses
+     ↓
+Server: Slot generation → Conflict check → Bump conflicting tasks → Course.create
+        → Task.insertMany → Return { course, lectureCount, bumpedCount }
+     ↓
+useCourseStore: append course to state
+     ↓
+CourseCreationForm: if bumpedCount > 0 show Alert, then navigate('/courses')
+     ↓
+CoursesPage: fetchCourses() → display course card
+     ↓
+CalendarPage: next fetchTasksInRange → lecture tasks appear on calendar
+              (displayed as courseCode chips)
+
+--- Completing a Virtual Recurring Task ---
+
+User clicks checkbox on virtual task in TasksPage
+     ↓
+useTaskStore.toggleComplete(virtualId)
+     ↓
+detect _virtual flag → find virtual task → extract recurringTemplateId
+     ↓
+taskService.updateTask(templateId, { updateScope:'this', startTime, endTime })
+     ↓
+Server: create concrete Task, set recurringTemplateId + occurrenceDate → return
+     ↓
+taskService.toggleTask(materialized._id)
+     ↓
+Server: toggle completed flag → return updated task
+     ↓
+useTaskStore: replace virtual entry in state with completed concrete task
+
+--- Todo Bumped by Course Conflict ---
+
+User creates course with Mon P3 slot
+Server finds existing "Run 5km" task at Mon 9:35am
+     ↓
+Compute weekOf = Sunday of that week
+     ↓
+Todo.create({ title:'Run 5km', category:'Wellness', weekOf, owner })
+Task.deleteOne({ _id: conflictingTask._id })
+     ↓
+Response: { course, lectureCount:N, bumpedCount:1 }
+     ↓
+Frontend: shows info Alert "1 task(s) were moved to Todos"
+     ↓
+TodosPage: shows "Run 5km" under the week "Apr 19 – Apr 25"
+
+
+================================================================================
+21. ENVIRONMENT & CONFIGURATION
+================================================================================
+
+Server (.env file — not committed to version control):
+
+  MONGO_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/<dbname>
+  JWT_SECRET=<random strong secret>
+  JWT_EXPIRES_IN=7d
+  RESEND_API_KEY=re_<key from resend.com>
+  PORT=3000
+
+Client (vite.config.ts — proxy only):
+
+  server: {
+    host: true,            // enables LAN access (mobile testing)
+    proxy: {
+      '/api': 'http://localhost:3000'
+    }
+  }
+
+Starting the application:
+
+  Terminal 1 (server):
+    cd server && npm run dev
+    → Nodemon starts Express on port 3000
+    → MongoDB connection established
+    → Reminder cron job started
+
+  Terminal 2 (client):
+    cd client && npm run dev
+    → Vite starts on http://localhost:5173
+    → /api/* proxied to http://localhost:3000
+
+Mobile access (same WiFi):
+  Visit http://<local-ip>:5173 on any device on the same network.
+  host: true in vite.config.ts enables this.
+
+
+================================================================================
+22. KNOWN CONSTRAINTS & DESIGN DECISIONS
+================================================================================
+
+1. Single-user model
+   Each task, todo, and course is owned by the user who created it. Projects
+   support multiple members (coach + students), but all personal content
+   (tasks, todos, courses) is strictly per-user.
+
+2. Virtual recurring tasks are not persisted until modified
+   Recurring task instances are generated in memory by the server on every
+   GET /api/tasks request. This avoids database bloat for long-running
+   recurring tasks. A virtual instance is only written to the database when
+   the user edits or completes that specific occurrence (materialization).
+
+3. Timezone handling in course scheduling
+   Slot times are computed using new Date(year, month, day, h, m) — local
+   time constructors — rather than UTC. This prevents early-morning periods
+   (e.g., P1 at 7:25am) from appearing on the wrong calendar day for users
+   in time zones west of UTC.
+
+4. Todo week requirement (breaking change)
+   The weekOf field was added as a soft-required constraint. The GET /api/todos
+   route filters for weekOf != null, so old todos created before this field
+   was introduced are hidden but not deleted. The TodoForm now requires a
+   week selection before saving.
+
+5. Course conflict resolution — course vs course (blocking)
+   If any new course slot overlaps any existing course's lecture task, the
+   entire course creation is rejected (409). The user must resolve the conflict
+   by adjusting the new course's schedule. There is no partial creation.
+
+6. Course conflict resolution — course vs other task (non-blocking, auto-bump)
+   Non-lecture tasks that overlap with the new course's schedule are
+   automatically moved to the Todo list with a weekOf equal to the week
+   containing the conflicting task. The user is notified via an info alert.
+   Academic tasks (from another course) are protected by the course-vs-course
+   check and will block creation instead.
+
+7. Email delivery constraint (Resend free tier)
+   On Resend's free tier, emails can only be delivered to the email address
+   used to register the Resend account. To test reminders, the FocusFlow
+   account email must match the Resend account email.
+
+8. No server-side pagination
+   All tasks in a date range are returned in a single response. For very
+   long date ranges or high-frequency recurring tasks, this could return large
+   payloads. The current implementation is designed for personal use with
+   bounded data volumes.
+
+9. Dashboard counts only concrete tasks
+   The dashboard filters out _virtual and isRecurringTemplate tasks when
+   computing planned/completed counts. Only fully scheduled (materialized)
+   tasks are counted, to avoid inflating "planned" with template definitions.
+
+10. Category as Academic priority rule
+    The course conflict bump rule is implemented in terms of the course field
+    (ObjectId presence), not the category field. A task with category:'Academic'
+    created manually (not via course) will still be bumped if it conflicts with
+    a new course's schedule. Only tasks with an actual course ObjectId reference
+    are treated as "lecture tasks" for the blocking check.
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================

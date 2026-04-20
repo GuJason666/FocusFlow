@@ -32,7 +32,7 @@ export function useCalendarEvents(viewStart: Date, viewEnd: Date): CalendarEvent
         events.push({
           id: task._id,
           type: 'task',
-          title: task.title,
+          title: task.courseCode || task.title,
           start,
           end,
           completed: task.completed,

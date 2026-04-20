@@ -11,7 +11,7 @@ import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { format, startOfWeek, endOfWeek, addWeeks } from 'date-fns';
+import { format, subYears, endOfWeek, addWeeks } from 'date-fns';
 import { useTaskStore } from '../../store/useTaskStore';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
@@ -20,7 +20,7 @@ export default function TasksPage() {
   const { tasks, loading, fetchTasksInRange, toggleComplete, deleteTask } = useTaskStore();
 
   useEffect(() => {
-    const start = startOfWeek(new Date(), { weekStartsOn: 0 });
+    const start = subYears(new Date(), 1);
     const end = endOfWeek(addWeeks(new Date(), 2), { weekStartsOn: 0 });
     fetchTasksInRange(start.toISOString(), end.toISOString());
   }, [fetchTasksInRange]);
@@ -60,6 +60,7 @@ export default function TasksPage() {
                 sx={{ textDecoration: task.completed ? 'line-through' : 'none', cursor: 'pointer' }}
                 onClick={() => !task._virtual && navigate(`/tasks/${task._id}`)}
               />
+              {task.category && <Chip label={task.category} size="small" variant="outlined" sx={{ mr: 0.5 }} />}
               {task.isRecurringTemplate && <Chip label="Recurring" size="small" sx={{ mr: 1 }} />}
             </ListItem>
           ))}

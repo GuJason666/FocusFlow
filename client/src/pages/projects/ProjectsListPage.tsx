@@ -11,13 +11,11 @@ import Chip from '@mui/material/Chip';
 import AddIcon from '@mui/icons-material/Add';
 import { format } from 'date-fns';
 import { useProjectStore } from '../../store/useProjectStore';
-import { useAuthStore } from '../../store/useAuthStore';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
 export default function ProjectsListPage() {
   const navigate = useNavigate();
   const { projects, loading, fetchProjects } = useProjectStore();
-  const user = useAuthStore((s) => s.user);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
 

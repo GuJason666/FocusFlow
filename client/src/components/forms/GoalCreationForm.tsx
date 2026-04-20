@@ -12,15 +12,21 @@ import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import MenuItem from '@mui/material/MenuItem';
+import Switch from '@mui/material/Switch';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useProjectStore } from '../../store/useProjectStore';
 import { createMilestone } from '../../services/milestoneService';
 import { generateTasks } from '../../services/projectService';
+import { CATEGORIES } from '../../constants/categories';
 
 const STEPS = ['Goal Info', 'Milestones', 'Weekly Tasks'];
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const genId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 interface MilestoneRow {
   id: string;
@@ -36,6 +42,8 @@ interface TaskTemplate {
   endTime: string;
   rangeStart: Date | null;
   rangeEnd: Date | null;
+  reminderEnabled: boolean;
+  reminderHours: number;
 }
 
 export default function GoalCreationForm() {
@@ -58,19 +66,21 @@ export default function GoalCreationForm() {
 
   // Step 1: Milestones
   const [milestones, setMilestones] = useState<MilestoneRow[]>([
-    { id: crypto.randomUUID(), title: '', deadline: null },
+    { id: genId(), title: '', deadline: null },
   ]);
 
   // Step 2: Recurring Tasks
   const [templates, setTemplates] = useState<TaskTemplate[]>([
     {
-      id: crypto.randomUUID(),
+      id: genId(),
       title: '',
       daysOfWeek: [1, 3, 5],
       startTime: '09:00',
       endTime: '10:00',
       rangeStart: null,
       rangeEnd: null,
+      reminderEnabled: false,
+      reminderHours: 1,
     },
   ]);
 
@@ -90,7 +100,7 @@ export default function GoalCreationForm() {
           const rounded = Math.round(value * 100) / 100;
           const milestoneDate = new Date(today.getTime() + totalMs * pct);
           return {
-            id: crypto.randomUUID(),
+            id: genId(),
             title: `Reach ${rounded}${unitLabel} (${pct * 100}%)`,
             deadline: milestoneDate,
           };
@@ -102,7 +112,7 @@ export default function GoalCreationForm() {
   };
 
   const addMilestone = () =>
-    setMilestones((prev) => [...prev, { id: crypto.randomUUID(), title: '', deadline: null }]);
+    setMilestones((prev) => [...prev, { id: genId(), title: '', deadline: null }]);
 
   const removeMilestone = (id: string) =>
     setMilestones((prev) => prev.filter((m) => m.id !== id));
@@ -114,13 +124,15 @@ export default function GoalCreationForm() {
     setTemplates((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: genId(),
         title: '',
         daysOfWeek: [1, 3, 5],
         startTime: '09:00',
         endTime: '10:00',
         rangeStart: null,
         rangeEnd: deadline,
+        reminderEnabled: false,
+        reminderHours: 1,
       },
     ]);
 
@@ -168,6 +180,7 @@ export default function GoalCreationForm() {
             endTime: t.endTime,
             rangeStart: t.rangeStart!.toISOString(),
             rangeEnd: t.rangeEnd!.toISOString(),
+            reminderHours: t.reminderEnabled ? t.reminderHours : null,
           }))
         );
         if (result.conflictCount > 0) {
@@ -215,12 +228,14 @@ export default function GoalCreationForm() {
             fullWidth
           />
           <TextField
+            select
             label="Category"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             fullWidth
-            placeholder="e.g. Fitness, Learning, Health"
-          />
+          >
+            {CATEGORIES.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+          </TextField>
           <DatePicker
             label="Deadline (optional)"
             value={deadline}
@@ -382,6 +397,29 @@ export default function GoalCreationForm() {
                     onChange={(v) => updateTemplate(t.id, 'rangeEnd', v)}
                     slotProps={{ textField: { size: 'small' } }}
                   />
+                </Stack>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={t.reminderEnabled}
+                        onChange={(e) => updateTemplate(t.id, 'reminderEnabled', e.target.checked)}
+                        size="small"
+                      />
+                    }
+                    label="Email reminder"
+                  />
+                  {t.reminderEnabled && (
+                    <TextField
+                      label="Hours before"
+                      type="number"
+                      value={t.reminderHours}
+                      onChange={(e) => updateTemplate(t.id, 'reminderHours', Math.max(0, parseInt(e.target.value) || 0))}
+                      size="small"
+                      sx={{ width: 130 }}
+                      inputProps={{ min: 1, max: 72 }}
+                    />
+                  )}
                 </Stack>
               </Stack>
             </Box>

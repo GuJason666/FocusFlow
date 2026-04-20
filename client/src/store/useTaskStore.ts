@@ -17,7 +17,7 @@ interface TaskState {
   removeTask: (id: string) => void;
 }
 
-export const useTaskStore = create<TaskState>((set) => ({
+export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   rangeStart: null,
   rangeEnd: null,
@@ -48,6 +48,19 @@ export const useTaskStore = create<TaskState>((set) => ({
   },
 
   toggleComplete: async (id) => {
+    const virtual = get().tasks.find((t) => t._id === id && t._virtual);
+    if (virtual) {
+      const materialized = await taskService.updateTask(virtual.recurringTemplateId as string, {
+        updateScope: 'this',
+        startTime: virtual.startTime,
+        endTime: virtual.endTime,
+      });
+      const completed = await taskService.toggleTask(materialized._id);
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t._id === id ? { ...completed, _virtual: false } : t)),
+      }));
+      return;
+    }
     const updated = await taskService.toggleTask(id);
     set((s) => ({
       tasks: s.tasks.map((t) => (t._id === id ? updated : t)),

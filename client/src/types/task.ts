@@ -20,7 +20,12 @@ export interface Task {
   isRecurringTemplate: boolean;
   recurringTemplateId?: string;
   occurrenceDate?: string;
+  category?: string;
   convertedFromTodo?: string;
+  reminderHours?: number | null;
+  reminderSent?: boolean;
+  course?: string;
+  courseCode?: string;
   _virtual?: boolean;
   createdAt?: string;
   updatedAt?: string;

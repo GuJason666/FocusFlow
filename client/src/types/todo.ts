@@ -8,9 +8,14 @@ export interface Todo {
   owner: User | string;
   assignedTo?: User | string;
   project?: string;
+  category?: string;
   completed: boolean;
   completedAt?: string;
   convertedToTaskId?: string;
+  weekOf?: string;
+  assignedBy?: User | string;
+  sourceCoachTodoId?: string;
+  assignedToStudents?: string[];
   createdAt?: string;
   updatedAt?: string;
 }

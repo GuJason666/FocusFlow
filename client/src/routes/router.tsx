@@ -1,6 +1,7 @@
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import ProtectedRoute from './ProtectedRoute';
 import AppShell from '../components/layout/AppShell';
+import { useAuthStore } from '../store/useAuthStore';
 
 import LoginPage from '../pages/auth/LoginPage';
 import RegisterPage from '../pages/auth/RegisterPage';
@@ -15,7 +16,17 @@ import TodosPage from '../pages/todos/TodosPage';
 import TodoNewPage from '../pages/todos/TodoNewPage';
 import TodoDetailPage from '../pages/todos/TodoDetailPage';
 import CoachDashboard from '../pages/coach/CoachDashboard';
+import StudentsPage from '../pages/coach/StudentsPage';
 import SettingsPage from '../pages/settings/SettingsPage';
+import DashboardPage from '../pages/dashboard/DashboardPage';
+import CoursesPage from '../pages/courses/CoursesPage';
+import CourseNewPage from '../pages/courses/CourseNewPage';
+import CourseDetailPage from '../pages/courses/CourseDetailPage';
+
+function RoleRedirect() {
+  const user = useAuthStore((s) => s.user);
+  return <Navigate to={user?.role === 'coach' ? '/students' : '/dashboard'} replace />;
+}
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -28,26 +39,95 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Navigate to="/calendar" replace /> },
-      { path: 'calendar', element: <CalendarPage /> },
-      { path: 'projects', element: <ProjectsListPage /> },
-      { path: 'projects/new', element: <ProjectNewPage /> },
-      { path: 'projects/:id', element: <ProjectDetailPage /> },
-      { path: 'tasks', element: <TasksPage /> },
-      { path: 'tasks/new', element: <TaskNewPage /> },
-      { path: 'tasks/:id', element: <TaskDetailPage /> },
+      { index: true, element: <RoleRedirect /> },
+
+      // Student-only routes
+      {
+        path: 'dashboard',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><DashboardPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'calendar',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><CalendarPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'projects',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><ProjectsListPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'projects/new',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><ProjectNewPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'projects/:id',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><ProjectDetailPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'tasks',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><TasksPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'tasks/new',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><TaskNewPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'tasks/:id',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><TaskDetailPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'courses',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><CoursesPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'courses/new',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><CourseNewPage /></ProtectedRoute>
+        ),
+      },
+      {
+        path: 'courses/:id',
+        element: (
+          <ProtectedRoute forbiddenRole="coach"><CourseDetailPage /></ProtectedRoute>
+        ),
+      },
+
+      // Shared routes
       { path: 'todos', element: <TodosPage /> },
       { path: 'todos/new', element: <TodoNewPage /> },
       { path: 'todos/:id', element: <TodoDetailPage /> },
+      { path: 'settings', element: <SettingsPage /> },
+
+      // Coach-only routes
+      {
+        path: 'students',
+        element: (
+          <ProtectedRoute requiredRole="coach"><StudentsPage /></ProtectedRoute>
+        ),
+      },
       {
         path: 'coach',
         element: (
-          <ProtectedRoute requiredRole="coach">
-            <CoachDashboard />
-          </ProtectedRoute>
+          <ProtectedRoute requiredRole="coach"><CoachDashboard /></ProtectedRoute>
         ),
       },
-      { path: 'settings', element: <SettingsPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

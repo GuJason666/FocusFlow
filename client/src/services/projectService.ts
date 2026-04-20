@@ -29,6 +29,7 @@ export interface TaskTemplate {
   endTime: string;
   rangeStart: string;
   rangeEnd: string;
+  reminderHours?: number | null;
 }
 
 export interface GenerateTasksResult {

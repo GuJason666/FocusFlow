@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import { DndContext, DragEndEvent, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { parse, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addDays, format } from 'date-fns';
+import { parse, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfDay, endOfDay, addDays, format } from 'date-fns';
 import CalendarToolbar, { CalendarView } from '../../components/calendar/CalendarToolbar';
 import DayView from '../../components/calendar/DayView';
 import WeekView from '../../components/calendar/WeekView';
@@ -18,10 +19,16 @@ import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 
 export default function CalendarPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [view, setView] = useState<CalendarView>(isMobile ? 'day' : 'week');
-  const [currentDate, setCurrentDate] = useState(new Date());
+
+  const locationState = location.state as { date?: string; view?: CalendarView } | null;
+  const [view, setView] = useState<CalendarView>(locationState?.view ?? (isMobile ? 'day' : 'week'));
+  const [currentDate, setCurrentDate] = useState(
+    locationState?.date ? new Date(locationState.date) : new Date()
+  );
   const [convertModal, setConvertModal] = useState<{
     open: boolean;
     todo: Todo | null;
@@ -34,7 +41,7 @@ export default function CalendarPage() {
   const todos = useTodoStore((s) => s.todos);
 
   const getViewRange = useCallback((v: CalendarView, d: Date) => {
-    if (v === 'day') return { start: d, end: d };
+    if (v === 'day') return { start: startOfDay(d), end: endOfDay(d) };
     if (v === 'week') return { start: startOfWeek(d, { weekStartsOn: 0 }), end: endOfWeek(d, { weekStartsOn: 0 }) };
     return { start: startOfMonth(d), end: endOfMonth(d) };
   }, []);
@@ -77,6 +84,14 @@ export default function CalendarPage() {
     setConvertModal({ open: true, todo, prefillStart });
   };
 
+  const handleEventClick = useCallback((event: any) => {
+    if (event.type === 'task' && !event.original._virtual) {
+      navigate(`/tasks/${event.original._id}`);
+    } else if (event.type === 'todo') {
+      navigate(`/todos/${event.original._id}`);
+    }
+  }, [navigate]);
+
   const weekStart =
     view === 'week' ? startOfWeek(currentDate, { weekStartsOn: 0 }) : currentDate;
 
@@ -96,17 +111,20 @@ export default function CalendarPage() {
               <DayView
                 date={currentDate}
                 events={events}
+                onEventClick={handleEventClick}
               />
             ) : view === 'week' ? (
               <WeekView
                 weekStart={weekStart}
                 events={events}
+                onEventClick={handleEventClick}
               />
             ) : (
               <MonthView
                 month={currentDate}
                 events={events}
                 todos={todos}
+                onEventClick={handleEventClick}
                 onDayClick={(date) => {
                   setCurrentDate(date);
                   setView('day');

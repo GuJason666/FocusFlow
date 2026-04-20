@@ -38,6 +38,13 @@ export default function TaskDetailPage() {
     setEditing(false);
   };
 
+  const handleToggle = async () => {
+    if (!id) return;
+    await toggleComplete(task._id);
+    const updated = await getTask(id);
+    setTask(updated);
+  };
+
   const handleDelete = async () => {
     if (!id) return;
     await deleteTask(id);
@@ -67,7 +74,7 @@ export default function TaskDetailPage() {
           </Typography>
           <Box display="flex" gap={1}>
             <Button variant="outlined" onClick={() => setEditing(true)}>Edit</Button>
-            <Button variant="outlined" onClick={() => toggleComplete(task._id)}>
+            <Button variant="outlined" onClick={handleToggle}>
               {task.completed ? 'Mark Incomplete' : 'Mark Complete'}
             </Button>
             <Button variant="outlined" color="error" onClick={() => setDeleteOpen(true)}>Delete</Button>

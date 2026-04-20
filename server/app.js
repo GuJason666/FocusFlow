@@ -7,6 +7,9 @@ const projectRoutes = require('./routes/projects');
 const milestoneRoutes = require('./routes/milestones');
 const taskRoutes = require('./routes/tasks');
 const todoRoutes = require('./routes/todos');
+const courseRoutes = require('./routes/courses');
+const coachStudentRoutes = require('./routes/coachStudents');
+const coachStatsRoutes = require('./routes/coachStats');
 
 const app = express();
 
@@ -19,6 +22,9 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/milestones', milestoneRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/todos', todoRoutes);
+app.use('/api/courses', courseRoutes);
+app.use('/api/coach-students', coachStudentRoutes);
+app.use('/api/coach', coachStatsRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);

@@ -8,6 +8,7 @@ const {
   parseISO,
 } = require('date-fns');
 const Task = require('../models/Task');
+const Todo = require('../models/Todo');
 const Project = require('../models/Project');
 const verifyToken = require('../middleware/auth');
 
@@ -139,7 +140,7 @@ router.get('/project/:projectId', verifyToken, async (req, res) => {
 // POST /api/tasks
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, startTime, endTime, assignedTo, project, recurring } = req.body;
+    const { title, description, startTime, endTime, assignedTo, project, recurring, reminderHours, category } = req.body;
     if (!title || !startTime || !endTime)
       return res.status(400).json({ error: 'title, startTime, endTime required' });
 
@@ -151,6 +152,8 @@ router.post('/', verifyToken, async (req, res) => {
       project,
       recurring,
       isRecurringTemplate,
+      reminderHours: reminderHours ?? null,
+      category: category || 'Other',
     });
     await task.populate('owner', 'name email');
     await task.populate('assignedTo', 'name email');
@@ -215,6 +218,15 @@ router.patch('/:id/complete', verifyToken, async (req, res) => {
     task.completed = !task.completed;
     task.completedAt = task.completed ? new Date() : undefined;
     await task.save();
+
+    // Sync completion back to the originating todo (for coach-assigned todo tracking)
+    if (task.convertedFromTodo) {
+      await Todo.findByIdAndUpdate(task.convertedFromTodo, {
+        completed: task.completed,
+        completedAt: task.completed ? new Date() : undefined,
+      });
+    }
+
     res.json(task);
   } catch (err) {
     res.status(500).json({ error: err.message });

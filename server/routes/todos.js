@@ -11,14 +11,24 @@ router.get('/', verifyToken, async (req, res) => {
     const userId = req.user._id;
     const { projectId } = req.query;
     const query = {
-      $or: [{ owner: userId }, { assignedTo: userId }],
-      convertedToTaskId: { $exists: false },
+      $and: [
+        { $or: [{ owner: userId }, { assignedTo: userId }] },
+        { weekOf: { $ne: null } },
+        {
+          $or: [
+            { convertedToTaskId: { $exists: false } },
+            // Show completed coach-assigned todos even after conversion
+            { assignedBy: { $exists: true }, completed: true },
+          ],
+        },
+      ],
     };
     if (projectId) query.project = projectId;
     const todos = await Todo.find(query)
       .populate('owner', 'name email')
       .populate('assignedTo', 'name email')
-      .sort({ deadline: 1 });
+      .populate('assignedBy', 'name email')
+      .sort({ weekOf: 1, deadline: 1 });
     res.json(todos);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -28,8 +38,41 @@ router.get('/', verifyToken, async (req, res) => {
 // POST /api/todos
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { title, description, deadline, assignedTo, project, recurring } = req.body;
+    const {
+      title, description, deadline, assignedTo, project,
+      recurring, category, weekOf, assignedToStudents,
+    } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
+
+    // Coach assigning to students: create source todo + one copy per student
+    if (Array.isArray(assignedToStudents) && assignedToStudents.length > 0) {
+      const sourceTodo = await Todo.create({
+        title, description, deadline,
+        owner: req.user._id,
+        category: category || 'Other',
+        weekOf: weekOf || null,
+        assignedToStudents,
+      });
+
+      // Create independent copy for each student
+      await Promise.all(
+        assignedToStudents.map((studentId) =>
+          Todo.create({
+            title, description, deadline,
+            owner: studentId,
+            category: category || 'Other',
+            weekOf: weekOf || null,
+            assignedBy: req.user._id,
+            sourceCoachTodoId: sourceTodo._id,
+          })
+        )
+      );
+
+      await sourceTodo.populate('owner', 'name email');
+      return res.status(201).json(sourceTodo);
+    }
+
+    // Regular todo creation
     const isRecurringTemplate = !!(recurring?.frequency);
     const todo = await Todo.create({
       title, description, deadline,
@@ -38,6 +81,8 @@ router.post('/', verifyToken, async (req, res) => {
       project,
       recurring,
       isRecurringTemplate,
+      category: category || 'Other',
+      weekOf: weekOf || null,
     });
     await todo.populate('owner', 'name email');
     await todo.populate('assignedTo', 'name email');
@@ -52,8 +97,8 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const todo = await Todo.findById(req.params.id);
     if (!todo) return res.status(404).json({ error: 'Todo not found' });
-    const { title, description, deadline, assignedTo, project, recurring } = req.body;
-    Object.assign(todo, { title, description, deadline, assignedTo, project, recurring });
+    const { title, description, deadline, assignedTo, project, recurring, category, weekOf } = req.body;
+    Object.assign(todo, { title, description, deadline, assignedTo, project, recurring, category, weekOf });
     await todo.save();
     await todo.populate('owner', 'name email');
     await todo.populate('assignedTo', 'name email');
@@ -82,6 +127,18 @@ router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const todo = await Todo.findById(req.params.id);
     if (!todo) return res.status(404).json({ error: 'Todo not found' });
+
+    // If this is a coach source todo, cascade delete student copies and their tasks
+    if (todo.assignedToStudents && todo.assignedToStudents.length > 0) {
+      const studentCopies = await Todo.find({ sourceCoachTodoId: todo._id });
+      for (const copy of studentCopies) {
+        if (copy.convertedToTaskId) {
+          await Task.deleteOne({ _id: copy.convertedToTaskId });
+        }
+      }
+      await Todo.deleteMany({ sourceCoachTodoId: todo._id });
+    }
+
     await todo.deleteOne();
     res.json({ message: 'Todo deleted' });
   } catch (err) {
@@ -109,6 +166,7 @@ router.post('/:id/convert', verifyToken, async (req, res) => {
       owner: todo.owner,
       assignedTo: todo.assignedTo || todo.owner,
       project: todo.project,
+      category: todo.category || 'Other',
       convertedFromTodo: todo._id,
     });
 

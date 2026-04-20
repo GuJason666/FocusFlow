@@ -8,12 +8,15 @@ const verifyToken = require('../middleware/auth');
 
 const router = express.Router();
 
+const coachId = (project) =>
+  (project.coach._id ?? project.coach).toString();
+
 const isCoachOwner = (project, userId) =>
-  project.coach.toString() === userId.toString();
+  coachId(project) === userId.toString();
 
 const isMember = (project, userId) =>
-  project.coach.toString() === userId.toString() ||
-  project.members.some((m) => m.toString() === userId.toString());
+  coachId(project) === userId.toString() ||
+  project.members.some((m) => (m._id ?? m).toString() === userId.toString());
 
 // GET /api/projects
 router.get('/', verifyToken, async (req, res) => {
@@ -78,7 +81,7 @@ router.post('/:id/generate-tasks', verifyToken, async (req, res) => {
     let overallEnd = null;
 
     for (const tpl of templates) {
-      const { title, description, daysOfWeek, startTime, endTime, rangeStart, rangeEnd } = tpl;
+      const { title, description, daysOfWeek, startTime, endTime, rangeStart, rangeEnd, reminderHours } = tpl;
       if (!title || !Array.isArray(daysOfWeek) || !rangeStart || !rangeEnd) continue;
 
       const [startH, startM] = (startTime || '09:00').split(':').map(Number);
@@ -105,6 +108,8 @@ router.post('/:id/generate-tasks', verifyToken, async (req, res) => {
             project: project._id,
             completed: false,
             isRecurringTemplate: false,
+            reminderHours: reminderHours ?? null,
+            category: project.goal || 'Other',
           });
         }
         current.setDate(current.getDate() + 1);

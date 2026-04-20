@@ -30,6 +30,7 @@ import { Milestone } from '../../types/milestone';
 import { Task } from '../../types/task';
 import { Todo } from '../../types/todo';
 import MilestoneForm from '../../components/forms/MilestoneForm';
+import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -38,7 +39,7 @@ export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
-  const { addMember, removeMember } = useProjectStore();
+  const { addMember, removeMember, deleteProject } = useProjectStore();
 
   const [project, setProject] = useState<Project | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -46,9 +47,11 @@ export default function ProjectDetailPage() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [milestoneDialog, setMilestoneDialog] = useState(false);
+  const [deleteGoalOpen, setDeleteGoalOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -60,15 +63,22 @@ export default function ProjectDetailPage() {
         const [t, td] = await Promise.all([getProjectTasks(id), getTodos(id)]);
         setTasks(t);
         setTodos(td);
-      } catch {
-        navigate('/projects');
+      } catch (err: any) {
+        setLoadError(err.response?.data?.error || err.message || 'Failed to load goal');
       } finally {
         setLoading(false);
       }
     })();
   }, [id, navigate]);
 
-  if (loading || !project) return <LoadingSpinner />;
+  if (loading) return <LoadingSpinner />;
+  if (loadError) return (
+    <Box>
+      <Alert severity="error" sx={{ mb: 2 }}>{loadError}</Alert>
+      <Button onClick={() => navigate('/projects')}>Back to Goals</Button>
+    </Box>
+  );
+  if (!project) return null;
 
   const isOwner =
     user?._id === (project.coach as any)?._id ||
@@ -77,6 +87,12 @@ export default function ProjectDetailPage() {
   const completedTasks = tasks.filter((t) => t.completed).length;
   const totalTasks = tasks.length;
   const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  const handleDeleteGoal = async () => {
+    if (!id) return;
+    await deleteProject(id);
+    navigate('/projects');
+  };
 
   const handleInvite = async () => {
     if (!inviteEmail || !id) return;
@@ -117,7 +133,20 @@ export default function ProjectDetailPage() {
   return (
     <Box>
       <Box mb={3}>
-        <Typography variant="h5" fontWeight={700}>{project.title}</Typography>
+        <Box display="flex" alignItems="flex-start" justifyContent="space-between">
+          <Typography variant="h5" fontWeight={700}>{project.title}</Typography>
+          {isOwner && (
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              startIcon={<DeleteIcon />}
+              onClick={() => setDeleteGoalOpen(true)}
+            >
+              Delete Goal
+            </Button>
+          )}
+        </Box>
         {project.description && (
           <Typography color="text.secondary" mt={0.5}>{project.description}</Typography>
         )}
@@ -292,6 +321,13 @@ export default function ProjectDetailPage() {
           </Dialog>
         </Box>
       )}
+      <ConfirmDialog
+        open={deleteGoalOpen}
+        title="Delete Goal"
+        message="This will permanently delete the goal and all its milestones and tasks. This cannot be undone."
+        onConfirm={handleDeleteGoal}
+        onCancel={() => setDeleteGoalOpen(false)}
+      />
     </Box>
   );
 }

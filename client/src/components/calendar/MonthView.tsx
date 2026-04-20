@@ -21,9 +21,10 @@ interface Props {
   events: CalendarEvent[];
   todos: Todo[];
   onDayClick?: (date: Date) => void;
+  onEventClick?: (event: CalendarEvent) => void;
 }
 
-export default function MonthView({ month, events, todos, onDayClick }: Props) {
+export default function MonthView({ month, events, todos, onDayClick, onEventClick }: Props) {
   const monthStart = startOfMonth(month);
   const monthEnd = endOfMonth(month);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -84,6 +85,7 @@ export default function MonthView({ month, events, todos, onDayClick }: Props) {
                 {dayEvents.slice(0, 2).map((e) => (
                   <Box
                     key={e.id}
+                    onClick={(ev) => { ev.stopPropagation(); onEventClick?.(e); }}
                     sx={{
                       bgcolor: e.color,
                       color: 'white',
@@ -91,6 +93,7 @@ export default function MonthView({ month, events, todos, onDayClick }: Props) {
                       px: 0.5,
                       mb: 0.25,
                       overflow: 'hidden',
+                      cursor: 'pointer',
                     }}
                   >
                     <Typography variant="caption" noWrap display="block">

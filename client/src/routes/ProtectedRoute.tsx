@@ -4,9 +4,10 @@ import { useAuthStore } from '../store/useAuthStore';
 interface Props {
   children: React.ReactNode;
   requiredRole?: 'coach' | 'student';
+  forbiddenRole?: 'coach' | 'student';
 }
 
-export default function ProtectedRoute({ children, requiredRole }: Props) {
+export default function ProtectedRoute({ children, requiredRole, forbiddenRole }: Props) {
   const { user, token } = useAuthStore();
   const location = useLocation();
 
@@ -15,7 +16,11 @@ export default function ProtectedRoute({ children, requiredRole }: Props) {
   }
 
   if (requiredRole && user.role !== requiredRole) {
-    return <Navigate to="/calendar" replace />;
+    return <Navigate to={user.role === 'coach' ? '/students' : '/dashboard'} replace />;
+  }
+
+  if (forbiddenRole && user.role === forbiddenRole) {
+    return <Navigate to={user.role === 'coach' ? '/students' : '/dashboard'} replace />;
   }
 
   return <>{children}</>;
